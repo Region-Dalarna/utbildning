@@ -56,3 +56,5 @@ jobs:
             sudo systemctl restart shiny-server && echo "Shiny Server omstartad."
           fi
 
+
+# (touch för workflow-registrering)
