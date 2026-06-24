@@ -137,3 +137,18 @@ html, body { overflow-x: hidden; }
   color: #fff;
   border-color: var(--rd-primary);
 }
+
+/* ---- Nedladdningsknappar (staplade i sidopanelen) -------------------- */
+.rd-nedladdningar { display: flex; flex-direction: column; gap: 8px; }
+.rd-nedladdningar .rd-btn {
+  width: 100%;
+  justify-content: center;
+  text-decoration: none;
+}
+
+/* ---- Hjälptext ovanför stapeln -------------------------------------- */
+.rd-hint--bar {
+  margin: 0 0 8px 2px;
+  font-size: 0.82rem;
+  color: var(--rd-text-muted);
+}

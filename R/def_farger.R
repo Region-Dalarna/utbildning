@@ -76,4 +76,4 @@ RD_TOOLTIP_CSS <- paste0(
 RD_HOVER_CSS        <- "fill:var(--rd-primary-dark);cursor:pointer;"
 RD_SELECT_CSS       <- "fill:var(--rd-primary-dark);"
 RD_KARTA_HOVER_CSS  <- "stroke:var(--rd-text);stroke-width:1;cursor:pointer;"
-RD_KARTA_SELECT_CSS <- "stroke:var(--rd-text);stroke-width:1.4;"
+RD_KARTA_SELECT_CSS <- "stroke:var(--rd-text);stroke-width:2.6;"

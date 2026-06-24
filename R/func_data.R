@@ -56,3 +56,20 @@ hamta_gymnasiedata <- function(force = FALSE) {
   }
   .data_cache$df
 }
+
+# ---- Excel-export ----------------------------------------------------------
+# Enkel men snygg formatering: fet rubrikrad i petrolblått, autobredd på
+# kolumner, fryst rubrikrad och autofilter. Kräver paketet openxlsx.
+skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet") {
+  wb <- openxlsx::createWorkbook()
+  openxlsx::addWorksheet(wb, blad)
+
+  rubrikstil <- openxlsx::createStyle(
+    fontColour = "#ffffff", fgFill = RD_PRIMARY, textDecoration = "bold",
+    halign = "left", valign = "center", border = "bottom", borderColour = "#ffffff"
+  )
+  openxlsx::writeData(wb, blad, df, headerStyle = rubrikstil, withFilter = TRUE)
+  openxlsx::setColWidths(wb, blad, cols = seq_along(df), widths = "auto")
+  openxlsx::freezePane(wb, blad, firstActiveRow = 2)
+  openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
+}
