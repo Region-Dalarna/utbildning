@@ -2,9 +2,8 @@
 #  mod_gymnasiet.R
 #  Shiny-modul för skolformen Gymnasiet.
 #
-#  Hierarki:
-#    N2  Statistikområde   -> radioGroupButtons (segmenterad knapprad)
-#    N3  Indikator         -> radioGroupButtons (knappar i 2-kolumnersrutnät)
+#  N2 Statistikområde -> radioGroupButtons (segmenterad knapprad)
+#  N3 Indikator       -> radioGroupButtons (knappar i 2-kolumnersrutnät)
 #
 #  Klara indikatorer ritas som dashboard: stapel (klickbar) + utveckling
 #  över tid + andel programtyp. Fältet "kon = TRUE" ger en kontroll under
@@ -55,7 +54,6 @@ gymnasiet_struktur <- list(
   )
 )
 
-# Hjälpare: bygg choices (visa = label, värde = nyckel).
 .choices_fran_lista <- function(x) {
   labels <- vapply(x, function(e) e$label, character(1))
   stats::setNames(names(x), unname(labels))
@@ -69,8 +67,7 @@ mod_gymnasiet_ui <- function(id) {
     div(
       class = "rd-segmented",
       shinyWidgets::radioGroupButtons(
-        inputId  = ns("omrade"),
-        label    = NULL,
+        inputId  = ns("omrade"), label = NULL,
         choices  = .choices_fran_lista(gymnasiet_struktur),
         selected = names(gymnasiet_struktur)[1]
       )
@@ -84,8 +81,7 @@ mod_gymnasiet_ui <- function(id) {
         tags$hr(),
 
         shinyWidgets::radioGroupButtons(
-          inputId = ns("geo_niva"),
-          label   = "Geografisk indelning",
+          inputId = ns("geo_niva"), label = "Geografisk indelning",
           choices = c("Kommun" = "kommun", "Samverkansområde" = "samverkansomrade"),
           selected = "kommun"
         ),
@@ -97,9 +93,14 @@ mod_gymnasiet_ui <- function(id) {
         uiOutput(ns("ar_ui")),
 
         tags$hr(),
+        tags$div(class = "rd-label", "Samverkansområden"),
         ggiraph::girafeOutput(ns("karta"), height = "320px"),
+
+        tags$hr(),
         div(
-          style = "margin-top:10px;",
+          class = "rd-nedladdningar",
+          downloadButton(ns("ladda_ner"), "Ladda ner aktuellt urval",
+                         class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
         )
@@ -112,12 +113,7 @@ mod_gymnasiet_ui <- function(id) {
           h2(textOutput(ns("titel"))),
           div(class = "rd-subtitle", textOutput(ns("brodsmula"))),
           uiOutput(ns("vy")),
-          uiOutput(ns("kalla")),
-          div(
-            style = "margin-top:14px;",
-            downloadButton(ns("ladda_ner"), "Ladda ner aktuellt urval",
-                           class = "rd-btn rd-btn--ghost")
-          )
+          uiOutput(ns("kalla"))
         )
       )
     )
@@ -161,11 +157,16 @@ mod_gymnasiet_server <- function(id) {
         choices = c("Hela Dalarna" = "_alla_", val), selected = "_alla_")
     }, ignoreInit = FALSE)
 
-    # Klick i kartan -> uppdatera Område-listrutan.
+    # Kartklick styr Område-valet. Klick på redan vald yta avmarkerar
+    # (ggiraph skickar tomt urval) -> tillbaka till Hela Dalarna.
+    # Kartan ritas inte om på geo_val, så ingen återställningsloop uppstår.
     observeEvent(input$karta_selected, {
       sel <- input$karta_selected
-      if (length(sel) >= 1) shinyWidgets::updatePickerInput(session, "geo_val", selected = sel)
-    }, ignoreNULL = TRUE, ignoreInit = TRUE)
+      ny  <- if (length(sel) >= 1) sel else "_alla_"
+      if (!identical(ny, input$geo_val)) {
+        shinyWidgets::updatePickerInput(session, "geo_val", selected = ny)
+      }
+    }, ignoreNULL = FALSE, ignoreInit = TRUE)
 
     valt_indikator <- reactive({
       req(input$omrade)
@@ -174,10 +175,7 @@ mod_gymnasiet_server <- function(id) {
       ind_list[[input$indikator]]
     })
 
-    # Aktuellt könsläge (förvalt: könsuppdelat).
-    kon_lage <- reactive({
-      if (is.null(input$kon_lage)) "kon" else input$kon_lage
-    })
+    kon_lage <- reactive({ if (is.null(input$kon_lage)) "kon" else input$kon_lage })
 
     geo_label <- reactive({
       gv <- input$geo_val
@@ -187,7 +185,6 @@ mod_gymnasiet_server <- function(id) {
       else gv
     })
 
-    # Basdata: geografi + driftsform (alla år).
     data_bas <- reactive({
       d  <- hamta_gymnasiedata()
       gv <- req(input$geo_val)
@@ -204,7 +201,6 @@ mod_gymnasiet_server <- function(id) {
       dplyr::filter(data_bas(), ar == as.integer(input$ar))
     })
 
-    # Valt program via klick i stapeln (styr trend + programtyp).
     program_vald <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
@@ -224,7 +220,6 @@ mod_gymnasiet_server <- function(id) {
              " · ", geo_label(), org_txt, " · ", req(input$ar))
     })
 
-    # Vy (dashboard för klara indikatorer).
     output$vy <- renderUI({
       ind <- valt_indikator()
       if (!isTRUE(ind$klar)) {
@@ -234,6 +229,8 @@ mod_gymnasiet_server <- function(id) {
       fluidRow(
         column(
           7,
+          tags$p(class = "rd-hint rd-hint--bar",
+                 "Klicka på en stapel i diagrammet för att se statistik för ett specifikt program."),
           ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
           uiOutput(ns("kon_kontroll"))
         ),
@@ -241,8 +238,7 @@ mod_gymnasiet_server <- function(id) {
           5,
           div(class = "rd-subcard",
               tags$h4("Utveckling över tid"),
-              tags$p(class = "rd-hint", "Klicka en stapel för ett enskilt program."),
-              ggiraph::girafeOutput(ns("d_trend"), height = "190px")),
+              ggiraph::girafeOutput(ns("d_trend"), height = "200px")),
           div(class = "rd-subcard",
               tags$h4("Andel efter programtyp och år"),
               ggiraph::girafeOutput(ns("d_programtyp"), height = "240px"))
@@ -250,7 +246,6 @@ mod_gymnasiet_server <- function(id) {
       )
     })
 
-    # Könskontroll under stapeln (bara för indikatorer med könsdata).
     output$kon_kontroll <- renderUI({
       if (!isTRUE(valt_indikator()$kon)) return(NULL)
       div(
@@ -263,7 +258,6 @@ mod_gymnasiet_server <- function(id) {
       )
     })
 
-    # ---- Renderingar ----
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
       df <- data_ar()
@@ -294,7 +288,7 @@ mod_gymnasiet_server <- function(id) {
     })
 
     output$karta <- ggiraph::renderGirafe({
-      k <- skapa_karta_samverkan(input$geo_niva, input$geo_val)
+      k <- skapa_karta_samverkan(input$geo_niva)
       validate(need(!is.null(k),
                     "Kartan kunde inte läsas (kräver sf och åtkomst till geodata-databasen)."))
       k
@@ -307,12 +301,12 @@ mod_gymnasiet_server <- function(id) {
     })
 
     output$ladda_ner <- downloadHandler(
-      filename = function() paste0("gymnasiet_", input$indikator, "_", input$ar, ".csv"),
-      content  = function(file) readr::write_excel_csv2(data_ar(), file)
+      filename = function() paste0("gymnasiet_", input$indikator, "_", input$ar, ".xlsx"),
+      content  = function(file) skriv_gymnasie_excel(data_ar(), file)
     )
     output$ladda_ner_alla <- downloadHandler(
-      filename = function() "gymnasiet_hela_datasetet.csv",
-      content  = function(file) readr::write_excel_csv2(hamta_gymnasiedata(), file)
+      filename = function() "gymnasiet_hela_datasetet.xlsx",
+      content  = function(file) skriv_gymnasie_excel(hamta_gymnasiedata(), file)
     )
   })
 }

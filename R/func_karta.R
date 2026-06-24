@@ -45,31 +45,22 @@ hamta_kommun_geometri <- function() {
 
 # niva: "kommun" eller "samverkansomrade". markerat: vald kod/namn eller "_alla_".
 # Kartan färgas alltid efter samverkansområde; markerat lyfts fram, övriga dämpas.
-skapa_karta_samverkan <- function(niva = "kommun", markerat = NULL) {
+# Kartan ritas per nivå och markeringen sköts av ggiraphs urval (klick).
+# Det gör att ett klick på en redan vald yta avmarkerar (-> hela Dalarna).
+skapa_karta_samverkan <- function(niva = "kommun") {
   geo <- hamta_kommun_geometri()
   if (is.null(geo)) return(NULL)
 
-  alla <- is.null(markerat) || markerat == "_alla_"
-  geo$markerad <- if (alla) {
-    TRUE
-  } else if (niva == "kommun") {
-    geo$kommkod == markerat
-  } else {
-    geo$samverkansomrade == markerat
-  }
   # Vad ett klick väljer: kommun i kommunläge, hela området i samverkansläge.
-  geo$valj <- if (niva == "kommun") geo$kommkod else geo$samverkansomrade
+  geo$valj    <- if (niva == "kommun") geo$kommkod else geo$samverkansomrade
   geo$tooltip <- paste0("<b>", geo$kommun, "</b><br/>", geo$samverkansomrade)
 
   g <- ggplot2::ggplot(geo) +
     ggiraph::geom_sf_interactive(
-      ggplot2::aes(fill = samverkansomrade, alpha = markerad,
-                   tooltip = tooltip, data_id = valj),
+      ggplot2::aes(fill = samverkansomrade, tooltip = tooltip, data_id = valj),
       color = "#ffffff", linewidth = 0.3) +
     ggplot2::scale_fill_manual(values = SAMVERKAN_FARGER, name = NULL) +
-    ggplot2::scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.12), guide = "none") +
-    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE,
-                                                 override.aes = list(alpha = 1))) +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
     ggplot2::theme_void(base_size = 11) +
     ggplot2::theme(
       legend.position = "bottom",
