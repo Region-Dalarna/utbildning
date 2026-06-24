@@ -1,8 +1,6 @@
 shinyServer(function(input, output, session) {
 
-  output$example_text <- renderText({
-    'Byt ut detta mot din egen serverlogik.'
-  })
+  # Skolform Gymnasiet (övriga skolformer är platshållare utan server).
+  mod_gymnasiet_server('gym')
 
 })
-

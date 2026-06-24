@@ -1,8 +1,139 @@
 /* ============================================================
    app.css
-   App-specifik styling för utbildning.
-   Laddas EFTER regiondalarna_ruf.css så att lokala regler
-   kan överstyra den delade identiteten vid behov.
+   App-specifik styling för Utbildning i Dalarna.
+   Laddas EFTER regiondalarna_ruf.css så lokala regler kan
+   överstyra den delade identiteten vid behov.
    ============================================================ */
 
-/* Lägg appspecifika regler här. */
+/* ---- App-specifika designtokens (utöver regiondalarna_ruf.css) --------
+   Könsfärger enligt Region Dalarna. Läses även in på R-sidan av
+   def_farger.R så att diagram och CSS delar samma definition. */
+:root {
+  --rd-kon-kvinnor: #e2a855;   /* kvinnor/flickor */
+  --rd-kon-man:     #459079;   /* män/pojkar */
+}
+
+/* ---- Full bredd: bryt ut header/footer ur container-fluids -------------
+   15px sidopadding (Bootstrap 3). Det tar bort de grå "listerna" i
+   topphörnen och låter blå listen + footern gå kant-i-kant.
+   overflow-x:hidden är en säkerhetsspärr mot horisontell scroll. */
+html, body { overflow-x: hidden; }
+
+.rd-header,
+.rd-footer {
+  margin-left: -15px;
+  margin-right: -15px;
+}
+
+/* ---- N2: segmenterade knappar (radioGroupButtons) ----------------------
+   Västmanlands "knapprad"-känsla men i petrolblå identitet. */
+.rd-segmented { margin-bottom: 16px; }
+
+.rd-segmented .btn-group-container-sw {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rd-segmented .radiobtn {
+  border: 1px solid var(--rd-border);
+  background: #fff;
+  color: var(--rd-text-muted);
+  border-radius: var(--rd-radius-sm) !important;
+  font-weight: 500;
+  padding: 8px 16px;
+  box-shadow: none;
+  transition: all 0.15s;
+}
+.rd-segmented .radiobtn:hover {
+  border-color: var(--rd-primary);
+  color: var(--rd-primary);
+}
+.rd-segmented .radiobtn.active,
+.rd-segmented .radiobtn.active:hover,
+.rd-segmented .radiobtn:active {
+  background: var(--rd-primary);
+  color: #fff;
+  border-color: var(--rd-primary);
+}
+
+/* ---- N3: indikatorknappar i 2-kolumnersrutnät -------------------------- */
+.rd-indikator-knappar .btn-group-container-sw {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+.rd-indikator-knappar .btn-group { width: 100%; }
+.rd-indikator-knappar .radiobtn {
+  width: 100%;
+  height: 100%;
+  white-space: normal;     /* långa etiketter får radbryta */
+  line-height: 1.2;
+  border: 1px solid var(--rd-border);
+  background: #fff;
+  color: var(--rd-text-muted);
+  border-radius: var(--rd-radius-sm) !important;
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  box-shadow: none;
+  transition: all 0.15s;
+}
+.rd-indikator-knappar .radiobtn:hover {
+  border-color: var(--rd-primary);
+  color: var(--rd-primary);
+}
+.rd-indikator-knappar .radiobtn.active,
+.rd-indikator-knappar .radiobtn.active:hover {
+  background: var(--rd-primary);
+  color: #fff;
+  border-color: var(--rd-primary);
+}
+
+/* ---- Sidopanel: dämpa Bootstraps grå "well"-bakgrund -------------------- */
+.rd-sidebar.well { background: #fff; }
+
+/* ---- Källtext under diagram --------------------------------------------- */
+.rd-caption {
+  margin-top: 10px;
+  font-size: var(--rd-fs-micro);
+  color: var(--rd-text-muted);
+}
+
+/* ---- Dashboard: små paneler till höger om stapeln --------------------- */
+.rd-subcard {
+  background: #fff;
+  border: 1px solid var(--rd-border);
+  border-radius: var(--rd-radius);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+.rd-subcard h4 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 6px 0;
+}
+.rd-hint {
+  font-size: var(--rd-fs-micro);
+  color: var(--rd-text-muted);
+  margin: 0 0 6px 0;
+}
+
+/* ---- Könskontroll under stapeln -------------------------------------- */
+.rd-kon-kontroll { margin-top: 12px; text-align: center; }
+.rd-kon-kontroll .btn-group-container-sw { display: inline-flex; gap: 6px; }
+.rd-kon-kontroll .radiobtn {
+  border: 1px solid var(--rd-border);
+  background: #fff;
+  color: var(--rd-text-muted);
+  border-radius: var(--rd-radius-sm) !important;
+  font-weight: 500;
+  padding: 5px 14px;
+  font-size: 0.82rem;
+}
+.rd-kon-kontroll .radiobtn.active,
+.rd-kon-kontroll .radiobtn.active:hover {
+  background: var(--rd-primary);
+  color: #fff;
+  border-color: var(--rd-primary);
+}
