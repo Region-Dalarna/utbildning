@@ -8,10 +8,10 @@ shinyUI(
       tags$link(rel = 'stylesheet', type = 'text/css', href = 'app.css')
     ),
 
-    # ---- Header (matchar .rd-header i regiondalarna_ruf.css) --------------
+    # ---- Header (full bredd via app.css) ---------------------------------
     tags$div(
       class = 'rd-header',
-      tags$div(class = 'rd-header__title', 'utbildning'),
+      tags$div(class = 'rd-header__title', 'Utbildning i Dalarna'),
       tags$a(
         class  = 'rd-header__right',
         href   = 'https://www.regiondalarna.se',
@@ -21,16 +21,33 @@ shinyUI(
       )
     ),
 
-    # ---- Innehåll ---------------------------------------------------------
-    tabsetPanel(
-      tabPanel('Tab 1',
-        h3('Hej från utbildning'),
-        verbatimTextOutput('example_text')
-      ),
-      tabPanel('Om', p('Beskriv applikationen här.'))
+    # ---- N1: Skolform (yttre tabsetPanel), hela bredden ------------------
+    div(
+      style = 'padding: 8px 24px 24px;',
+      tabsetPanel(
+        id = 'skolform',
+
+        tabPanel('Gymnasiet',     mod_gymnasiet_ui('gym')),
+        tabPanel('Yrkeshögskola', mod_skolform_placeholder_ui('yh',       'Yrkeshögskola')),
+        tabPanel('Komvux',        mod_skolform_placeholder_ui('komvux',   'Komvux')),
+        tabPanel('Högskola',      mod_skolform_placeholder_ui('hogskola', 'Högskola')),
+
+        tabPanel(
+          'Om rapporten',
+          div(class = 'rd-card',
+              h2('Om rapporten'),
+              p('Den här applikationen visar utbildningsstatistik för Dalarna. ',
+                'I nuvarande version är gymnasiet inlagt; YH, komvux och högskola ',
+                'tillkommer efter hand.'),
+              div(class = 'rd-info',
+                  tags$strong('Källa: '),
+                  'Gymnasieantagningen, Dalarnas kommunförbund.')
+          )
+        )
+      )
     ),
 
-    # ---- Footer (matchar .rd-footer i regiondalarna_ruf.css) --------------
+    # ---- Footer (full bredd via app.css) ---------------------------------
     tags$div(
       class = 'rd-footer',
       'Samhällsanalys, Region Dalarna · ',
