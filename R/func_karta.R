@@ -43,41 +43,76 @@ hamta_kommun_geometri <- function() {
   .geo_cache$geo
 }
 
-# niva: "kommun" eller "samverkansomrade". markerat: vald kod/namn eller "_alla_".
-# Kartan färgas alltid efter samverkansområde; markerat lyfts fram, övriga dämpas.
-# Kartan ritas per nivå och markeringen sköts av ggiraphs urval (klick).
-# Det gör att ett klick på en redan vald yta avmarkerar (-> hela Dalarna).
+# niva: "kommun" eller "samverkansomrade".
+# Kommunläge: kommunerna var för sig (enfärgade, vita kommungränser), inga
+#   samverkansområden syns. Klick väljer kommun.
+# Samverkansläge: kommunerna inom samma område slås ihop (inre gränser tas bort)
+#   och färgas per område. Klick väljer hela området.
+# Markeringen sköts av ggiraphs urval (klick), så ett klick på en redan vald yta
+# avmarkerar (-> hela Dalarna).
 skapa_karta_samverkan <- function(niva = "kommun") {
   geo <- hamta_kommun_geometri()
   if (is.null(geo)) return(NULL)
 
-  # Vad ett klick väljer: kommun i kommunläge, hela området i samverkansläge.
-  geo$valj    <- if (niva == "kommun") geo$kommkod else geo$samverkansomrade
+  gemensam_girafe <- function(g) {
+    ggiraph::girafe(
+      ggobj = g, width_svg = 3.6, height_svg = 4.6,
+      options = list(
+        ggiraph::opts_hover(css = RD_KARTA_HOVER_CSS),
+        ggiraph::opts_tooltip(css = RD_TOOLTIP_CSS),
+        ggiraph::opts_selection(type = "single", only_shiny = TRUE,
+                                css = RD_KARTA_SELECT_CSS),
+        ggiraph::opts_toolbar(saveaspng = TRUE,
+                              hidden = c("lasso_select", "lasso_deselect"))
+      )
+    )
+  }
+
+  if (niva == "samverkansomrade") {
+    # Slå ihop kommunerna till ett område-polygon (inre gränser försvinner).
+    omr <- geo |>
+      dplyr::group_by(samverkansomrade) |>
+      dplyr::summarise(.groups = "drop")
+
+    # Tooltip på det interaktiva lagret: visa kommunnamn + område när man hovrar.
+    geo$tooltip <- paste0("<b>", geo$kommun, "</b><br/>", geo$samverkansomrade)
+
+    g <- ggplot2::ggplot() +
+      # Lager 1: områden (interaktivt, klickbart, ger urval)
+      ggiraph::geom_sf_interactive(
+        data = omr,
+        ggplot2::aes(fill = samverkansomrade, data_id = samverkansomrade,
+                     tooltip = samverkansomrade),
+        color = NA) +                                    # inga synliga gränser här …
+      # Lager 2: kommungränser (svaga, ej interaktiva)
+      ggplot2::geom_sf(
+        data = geo, fill = NA, color = "white", linewidth = 0.25, alpha = 0.6) +
+      # Lager 3: hover/tooltip på kommunnivå (transparent fyll, interaktivt)
+      ggiraph::geom_sf_interactive(
+        data = geo,
+        ggplot2::aes(tooltip = tooltip, data_id = samverkansomrade),
+        fill = NA, color = NA) +                         # syns inte, men fångar hover
+      ggplot2::scale_fill_manual(values = SAMVERKAN_FARGER, name = NULL) +
+      ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
+      ggplot2::theme_void(base_size = 11) +
+      ggplot2::theme(
+        legend.position = "bottom",
+        legend.key.size = ggplot2::unit(10, "pt"),
+        legend.text     = ggplot2::element_text(size = 8),
+        plot.margin     = ggplot2::margin(2, 2, 2, 2)
+      )
+    return(gemensam_girafe(g))
+  }
+
+  # Kommunläge: enfärgade kommuner, vita gränser, ingen områdesfärg/legend.
   geo$tooltip <- paste0("<b>", geo$kommun, "</b><br/>", geo$samverkansomrade)
 
   g <- ggplot2::ggplot(geo) +
     ggiraph::geom_sf_interactive(
-      ggplot2::aes(fill = samverkansomrade, tooltip = tooltip, data_id = valj),
-      color = "#ffffff", linewidth = 0.3) +
-    ggplot2::scale_fill_manual(values = SAMVERKAN_FARGER, name = NULL) +
-    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
+      ggplot2::aes(tooltip = tooltip, data_id = kommkod),
+      fill = KOMMUN_FYLL, color = "#ffffff", linewidth = 0.4) +
     ggplot2::theme_void(base_size = 11) +
-    ggplot2::theme(
-      legend.position = "bottom",
-      legend.key.size = ggplot2::unit(10, "pt"),
-      legend.text     = ggplot2::element_text(size = 8),
-      plot.margin     = ggplot2::margin(2, 2, 2, 2)
-    )
-
-  ggiraph::girafe(
-    ggobj = g, width_svg = 3.6, height_svg = 4.6,
-    options = list(
-      ggiraph::opts_hover(css = RD_KARTA_HOVER_CSS),
-      ggiraph::opts_tooltip(css = RD_TOOLTIP_CSS),
-      ggiraph::opts_selection(type = "single", only_shiny = TRUE,
-                              css = RD_KARTA_SELECT_CSS),
-      ggiraph::opts_toolbar(saveaspng = FALSE,
-                            hidden = c("lasso_select", "lasso_deselect"))
-    )
-  )
+    ggplot2::theme(legend.position = "none",
+                   plot.margin = ggplot2::margin(2, 2, 2, 2))
+  gemensam_girafe(g)
 }

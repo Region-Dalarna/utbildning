@@ -11,6 +11,7 @@
 :root {
   --rd-kon-kvinnor: #e2a855;   /* kvinnor/flickor */
   --rd-kon-man:     #459079;   /* män/pojkar */
+  --rd-kommun-fyll: #a9d4e0;   /* enfärgade kommuner i kartan (kommunläge) */
 }
 
 /* ---- Full bredd: bryt ut header/footer ur container-fluids -------------
@@ -62,12 +63,21 @@ html, body { overflow-x: hidden; }
   grid-template-columns: 1fr 1fr;
   gap: 6px;
   margin-top: 4px;
+  width: 100%;
 }
-.rd-indikator-knappar .btn-group { width: 100%; }
+.rd-indikator-knappar * { box-sizing: border-box; }
+.rd-indikator-knappar .btn-group {
+  width: 100%;
+  min-width: 0;        /* tillåt krympning i rutnätet */
+  margin: 0 !important;
+}
 .rd-indikator-knappar .radiobtn {
   width: 100%;
   height: 100%;
-  white-space: normal;     /* långa etiketter får radbryta */
+  box-sizing: border-box;
+  white-space: normal !important;   /* långa etiketter får radbryta */
+  overflow-wrap: anywhere;          /* bryt även långa ord vid behov */
+  word-break: break-word;
   line-height: 1.2;
   border: 1px solid var(--rd-border);
   background: #fff;
@@ -146,9 +156,32 @@ html, body { overflow-x: hidden; }
   text-decoration: none;
 }
 
-/* ---- Hjälptext ovanför stapeln -------------------------------------- */
+/* ---- Hjälptext ovanför stapeln (tydlig tips-ruta, ej rubrik) -------- */
 .rd-hint--bar {
-  margin: 0 0 8px 2px;
-  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  max-width: 100%;
+  margin: 0 0 10px 0;
+  padding: 5px 12px;
+  font-size: 0.6rem;
+  font-style: italic;
+  color: var(--rd-primary-dark, #0f7090);
+  background: rgba(21, 141, 175, 0.08);
+  border-left: 3px solid var(--rd-accent, #54a1bd);
+  border-radius: 4px;
+}
+.rd-hint--bar::before {
+  content: "\24D8"; /* ⓘ */
+  font-style: normal;
+  font-weight: 700;
+  color: var(--rd-accent, #54a1bd);
+}
+
+/* ---- Brödsmula (navigering högst upp i kortet) ---------------------- */
+.rd-brodsmula {
+  font-size: 0.85rem;
   color: var(--rd-text-muted);
+  margin-bottom: 14px;
 }
