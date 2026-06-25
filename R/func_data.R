@@ -57,6 +57,129 @@ hamta_gymnasiedata <- function(force = FALSE) {
   .data_cache$df
 }
 
+# ============================================================
+#  Elever (Skolverket) – långt format som görs brett
+# ============================================================
+.elever_cache <- new.env(parent = emptyenv())
+
+# Klassar gymnasieprogram-värdet i nivå, eftersom Skolverkets kolumn blandar
+# totaler, programtyper, enskilda program och introduktionsundertyper.
+.elever_niva <- function(program) {
+  dplyr::case_when(
+    program == "Nationella program"                                  ~ "total",
+    program %in% c("Högskoleförberedande program", "Yrkesprogram")   ~ "programtyp",
+    program %in% c("Introduktionsprogrammen", "Riksrekryterande utbildningar") ~ "ovrigt_agg",
+    grepl("^Introduktionsprogram,", program)                         ~ "introduktion_sub",
+    TRUE                                                             ~ "program"
+  )
+}
+
+# Tvättar elevtabellen: behåller Dalarnas kommunrader, härleder år, gör bred,
+# döper om mätkolumnerna, och sätter nivå + programtyp (programtyp tas ur
+# datans egna aggregatrader, inte via join mot antagningsdatan).
+rensa_elevdata <- function(rad) {
+  byt <- c(
+    "Antal elever"                 = "antal_elever",
+    "Andel kvinnor (%)"            = "andel_kvinnor",
+    "Andel m utl bakgr (%)"        = "andel_utl",
+    "Andel m högutb föräldrar (%)" = "andel_hogutb",
+    "Antal elever skolår 1"        = "elever_ak1",
+    "Antal elever skolår 2"        = "elever_ak2",
+    "Antal elever skolår 3"        = "elever_ak3"
+  )
+
+  # Steg 1: Rensa och filtrera rådata till Dalarnas kommunrader.
+  # "Samtliga" är en förberäknad totalsumma och tas bort för att undvika
+  # dubbelräkning när vi summerar Kommunal + Enskild + eventuella andra.
+  rad_fil <- rad |>
+    dplyr::rename(program = gymnasieprogram, kommkod = regionkod,
+                  kommun = region, organisationstyp = huvudman) |>
+    dplyr::mutate(
+      kommkod = as.character(kommkod),
+      ar      = as.integer(substr(as.character(lasar), 1, 4)),
+      varde   = as.numeric(varde)
+    ) |>
+    dplyr::filter(
+      nchar(kommkod) == 4,
+      substr(kommkod, 1, 2) == "20",
+      organisationstyp != "Samtliga"
+    )
+
+  # Steg 2: Summera per (ar, kommkod, program, organisationstyp, variabel).
+  # organisationstyp behålls så att driftsformsfiltret i appen fungerar precis
+  # som för antagningsdata (Kommunal / Enskild / Alla).
+  antal_var  <- "Antal elever"
+  andel_vars <- c("Andel kvinnor (%)", "Andel m utl bakgr (%)",
+                  "Andel m högutb föräldrar (%)")
+  skolar_vars <- c("Antal elever skolår 1", "Antal elever skolår 2",
+                   "Antal elever skolår 3")
+
+  # Antal och skolår summeras per driftsform.
+  antal_df <- rad_fil |>
+    dplyr::filter(variabel == antal_var) |>
+    dplyr::group_by(ar, kommkod, kommun, program, organisationstyp) |>
+    dplyr::summarise(varde = sum(varde, na.rm = TRUE), .groups = "drop") |>
+    dplyr::mutate(variabel = antal_var)
+
+  skolar_df <- rad_fil |>
+    dplyr::filter(variabel %in% skolar_vars) |>
+    dplyr::group_by(ar, kommkod, kommun, program, organisationstyp, variabel) |>
+    dplyr::summarise(varde = sum(varde, na.rm = TRUE), .groups = "drop")
+
+  # Andelar viktas med antal elever per driftsform.
+  andel_df <- rad_fil |>
+    dplyr::filter(variabel %in% andel_vars) |>
+    dplyr::left_join(
+      dplyr::select(antal_df, ar, kommkod, program, organisationstyp, antal = varde),
+      by = c("ar", "kommkod", "program", "organisationstyp")) |>
+    dplyr::group_by(ar, kommkod, kommun, program, organisationstyp, variabel) |>
+    dplyr::summarise(
+      varde = dplyr::if_else(
+        sum(antal, na.rm = TRUE) > 0,
+        sum(varde * antal, na.rm = TRUE) / sum(antal, na.rm = TRUE),
+        NA_real_),
+      .groups = "drop")
+
+  df <- dplyr::bind_rows(antal_df, skolar_df, andel_df) |>
+    tidyr::pivot_wider(names_from = variabel, values_from = varde)
+
+  # Döp om mätkolumnerna till syntaktiska namn (de som finns).
+  for (gammalt in names(byt)) {
+    if (gammalt %in% names(df)) names(df)[names(df) == gammalt] <- byt[[gammalt]]
+  }
+
+  df |>
+    dplyr::mutate(
+      prog_niva  = .elever_niva(program),
+      programtyp = dplyr::case_when(
+        program == "Högskoleförberedande program" ~ "Högskoleförberedande program",
+        program == "Yrkesprogram"                 ~ "Yrkesprogram",
+        prog_niva == "ovrigt_agg"                 ~ "Övriga utbildningar",
+        TRUE                                      ~ NA_character_
+      )
+    ) |>
+    dplyr::left_join(kommun_samverkan, by = "kommkod")
+}
+
+# OBS: byt ut tabellnamnet nedan mot den faktiska elevtabellen i databasen.
+hamta_gymnasie_elever <- function(force = FALSE) {
+  if (force || is.null(.elever_cache$df)) {
+    con <- shiny_uppkoppling_las("oppna_data")
+    rad <- dplyr::tbl(con, dbplyr::in_schema("skolverket", "gymnasiet_elever")) |>
+      dplyr::collect()
+    .elever_cache$df <- rensa_elevdata(rad)
+  }
+  .elever_cache$df
+}
+
+# Plockar ut de enskilda programmen (för stapel/trend), bort med aggregat-
+# och totalrader. För antagningsdata (som saknar prog_niva) returneras df oförändrad.
+elever_endast_program <- function(df) {
+  if ("prog_niva" %in% names(df))
+    dplyr::filter(df, prog_niva %in% c("program", "introduktion_sub"))
+  else df
+}
+
 # ---- Excel-export ----------------------------------------------------------
 # Enkel men snygg formatering: fet rubrikrad i petrolblått, autobredd på
 # kolumner, fryst rubrikrad och autofilter. Kräver paketet openxlsx.

@@ -32,15 +32,22 @@
 .RD_CSS <- .las_css_variabler(c("www/regiondalarna_ruf.css", "www/app.css"))
 
 # Hämta en CSS-variabel som R-värde (med fallback).
+# OBS: .RD_CSS är en atomär vektor – [[ på ett saknat namn KASTAR
+# "subscript out of bounds", så vi måste kolla namnet först för att
+# fallbacken ska fungera.
 rd_farg <- function(namn, fallback = "#000000") {
+  if (!namn %in% names(.RD_CSS)) return(fallback)
   v <- .RD_CSS[[namn]]
-  if (is.null(v) || !nzchar(v)) fallback else v
+  if (is.null(v) || is.na(v) || !nzchar(v)) fallback else v
 }
 
 # ---- Basfärger -------------------------------------------------------------
 RD_PRIMARY    <- rd_farg("rd-primary",    "#158daf")
 RD_ACCENT     <- rd_farg("rd-accent",     "#54a1bd")
+RD_TEXT       <- rd_farg("rd-text",       "#212529")
 RD_TEXT_MUTED <- rd_farg("rd-text-muted", "#6c757d")
+# Enfärgad fyllnad för kommunläget i kartan (ljus petrolton).
+KOMMUN_FYLL   <- rd_farg("rd-kommun-fyll", "#a9d4e0")
 
 # ---- Kön (definieras i app.css) --------------------------------------------
 KON_FARGER <- c(
@@ -59,6 +66,13 @@ programtyp_farger <- function(typer) {
   stats::setNames(grDevices::colorRampPalette(PROGRAMTYP_STOPS)(length(typer)), typer)
 }
 
+# ---- Årskurs (elever): tre steg i den blå vektorn --------------------------
+ARSKURS_FARGER <- c(
+  "Årskurs 1" = rd_farg("rd-blue-light", "#8edded"),
+  "Årskurs 2" = rd_farg("rd-primary",    "#158daf"),
+  "Årskurs 3" = rd_farg("rd-blue-deep",  "#0074a2")
+)
+
 # ---- Samverkansområden (RD:s blå vektor) -----------------------------------
 SAMVERKAN_FARGER <- c(
   "Gysam Västra"            = rd_farg("rd-blue-bright", "#00b4e4"),
@@ -75,5 +89,5 @@ RD_TOOLTIP_CSS <- paste0(
 )
 RD_HOVER_CSS        <- "fill:var(--rd-primary-dark);cursor:pointer;"
 RD_SELECT_CSS       <- "fill:var(--rd-primary-dark);"
-RD_KARTA_HOVER_CSS  <- "stroke:var(--rd-text);stroke-width:1;cursor:pointer;"
-RD_KARTA_SELECT_CSS <- "stroke:var(--rd-text);stroke-width:2.6;"
+RD_KARTA_HOVER_CSS  <- "stroke:#1a1a2e;stroke-width:2.5;paint-order:stroke fill;cursor:pointer;"
+RD_KARTA_SELECT_CSS <- "stroke:#1a1a2e;stroke-width:3;paint-order:stroke fill;"

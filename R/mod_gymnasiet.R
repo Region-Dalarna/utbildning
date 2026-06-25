@@ -17,16 +17,20 @@ gymnasiet_struktur <- list(
   antagning = list(
     label = "Antagning",
     indikatorer = list(
-      platser_program = list(label = "Platser efter program", klar = TRUE, kon = FALSE,
+      platser_program = list(label = "Platser", klar = TRUE, kon = FALSE,
+                             amne = "Gymnasieplatser",
                              metrik = "platser", metrik_label = "Antal platser",
                              kalla = .KALLA_ANTAGNING),
-      antagna_program = list(label = "Antagna efter program", klar = TRUE, kon = TRUE,
+      antagna_program = list(label = "Antagna", klar = TRUE, kon = TRUE,
+                             amne = "Antagna gymnasieelever",
                              metrik = "antagna", metrik_kv = "antagna_kv", metrik_man = "antagna_man",
                              metrik_label = "Antal antagna", kalla = .KALLA_ANTAGNING),
-      sokande_forsta  = list(label = "Sökande, första hand", klar = TRUE, kon = TRUE,
+      sokande_forsta  = list(label = "Förstahandssökande", klar = TRUE, kon = TRUE,
+                             amne = "Förstahandssökande till gymnasiet",
                              metrik = "sok_1a", metrik_kv = "sok_1a_kv", metrik_man = "sok_1a_man",
                              metrik_label = "Förstahandssökande", kalla = .KALLA_ANTAGNING),
       outnyttjade     = list(label = "Outnyttjade platser", klar = TRUE, kon = FALSE,
+                             amne = "Outnyttjade gymnasieplatser",
                              metrik = "lediga_platser", metrik_label = "Outnyttjade platser",
                              kalla = .KALLA_ANTAGNING),
       antagningspoang = list(label = "Antagningspoäng", klar = FALSE, kalla = .KALLA_ANTAGNING)
@@ -35,9 +39,23 @@ gymnasiet_struktur <- list(
   elever = list(
     label = "Elever",
     indikatorer = list(
-      elever_program = list(label = "Elever per program", klar = FALSE, kalla = "Skolverket"),
-      elever_skolar  = list(label = "Elever per skolår",  klar = FALSE, kalla = "Skolverket"),
-      behoriga       = list(label = "Andel behöriga",     klar = FALSE, kalla = "Skolverket")
+      antal_elever  = list(label = "Antal elever", klar = TRUE, vy = "dashboard", kon = FALSE,
+                           amne = "Antal gymnasieelever",
+                           metrik = "antal_elever", metrik_label = "Antal elever",
+                           kalla = "Skolverket"),
+      elever_arskurs = list(label = "Elever per årskurs", klar = TRUE, vy = "arskurs", kon = FALSE,
+                            amne = "Gymnasieelever per årskurs",
+                            metrik = "antal_elever", metrik_label = "Antal elever",
+                            kalla = "Skolverket"),
+      andel_kvinnor = list(label = "Andel kvinnor", klar = TRUE, vy = "andel", kon = FALSE,
+                           amne = "Andel kvinnor", metrik = "andel_kvinnor", vikt = "antal_elever",
+                           metrik_label = "Andel kvinnor (%)", kalla = "Skolverket"),
+      andel_utl     = list(label = "Utländsk bakgrund", klar = TRUE, vy = "andel", kon = FALSE,
+                           amne = "Andel med utländsk bakgrund", metrik = "andel_utl", vikt = "antal_elever",
+                           metrik_label = "Andel med utländsk bakgrund (%)", kalla = "Skolverket"),
+      andel_hogutb  = list(label = "Högutbildade föräldrar", klar = TRUE, vy = "andel", kon = FALSE,
+                           amne = "Andel med högutbildade föräldrar", metrik = "andel_hogutb", vikt = "antal_elever",
+                           metrik_label = "Andel med högutbildade föräldrar (%)", kalla = "Skolverket")
     )
   ),
   resultat = list(
@@ -54,6 +72,9 @@ gymnasiet_struktur <- list(
   )
 )
 
+# Etiketter genereras rakt från label-fältet. CSS (white-space: normal +
+# overflow-wrap) bryter texten automatiskt vid behov — \n i label-strängar
+# behövs inte och ska inte användas.
 .choices_fran_lista <- function(x) {
   labels <- vapply(x, function(e) e$label, character(1))
   stats::setNames(names(x), unname(labels))
@@ -93,7 +114,7 @@ mod_gymnasiet_ui <- function(id) {
         uiOutput(ns("ar_ui")),
 
         tags$hr(),
-        tags$div(class = "rd-label", "Samverkansområden"),
+        uiOutput(ns("karta_rubrik")),
         ggiraph::girafeOutput(ns("karta"), height = "320px"),
 
         tags$hr(),
@@ -110,10 +131,8 @@ mod_gymnasiet_ui <- function(id) {
         width = 9,
         div(
           class = "rd-card",
-          h2(textOutput(ns("titel"))),
-          div(class = "rd-subtitle", textOutput(ns("brodsmula"))),
-          uiOutput(ns("vy")),
-          uiOutput(ns("kalla"))
+          div(class = "rd-brodsmula", textOutput(ns("brodsmula"))),
+          uiOutput(ns("vy"))
         )
       )
     )
@@ -137,8 +156,15 @@ mod_gymnasiet_server <- function(id) {
       )
     })
 
+    # Väljer datakälla utifrån statistikområde: Elever -> elevtabellen,
+    # övriga områden -> antagningsdatan.
+    aktuell_data <- reactive({
+      if (identical(input$omrade, "elever")) hamta_gymnasie_elever() else hamta_gymnasiedata()
+    })
+    ar_elever <- reactive({ identical(input$omrade, "elever") })
+
     output$org_ui <- renderUI({
-      typer <- sort(unique(stats::na.omit(hamta_gymnasiedata()$organisationstyp)))
+      typer <- sort(unique(stats::na.omit(aktuell_data()$organisationstyp)))
       shinyWidgets::radioGroupButtons(
         inputId = ns("organisationstyp"), label = "Driftsform",
         choices = c("Alla" = "_alla_", stats::setNames(typer, typer)), selected = "_alla_"
@@ -146,7 +172,7 @@ mod_gymnasiet_server <- function(id) {
     })
 
     output$ar_ui <- renderUI({
-      ar <- sort(unique(hamta_gymnasiedata()$ar), decreasing = TRUE)
+      ar <- sort(unique(aktuell_data()$ar), decreasing = TRUE)
       selectInput(ns("ar"), "År", choices = ar, selected = max(ar))
     })
 
@@ -175,18 +201,24 @@ mod_gymnasiet_server <- function(id) {
       ind_list[[input$indikator]]
     })
 
+    # Vy-typ för vald indikator (default = dashboard).
+    valt_vy <- reactive({
+      v <- valt_indikator()$vy
+      if (is.null(v)) "dashboard" else v
+    })
+
     kon_lage <- reactive({ if (is.null(input$kon_lage)) "kon" else input$kon_lage })
 
     geo_label <- reactive({
       gv <- input$geo_val
-      if (is.null(gv) || gv == "_alla_") return("Hela Dalarna")
+      if (is.null(gv) || gv == "_alla_") return("Dalarna")
       if (input$geo_niva == "kommun")
         dalarna_kommuner$kommun[match(gv, dalarna_kommuner$kommkod)]
       else gv
     })
 
     data_bas <- reactive({
-      d  <- hamta_gymnasiedata()
+      d  <- aktuell_data()
       gv <- req(input$geo_val)
       if (gv != "_alla_") {
         d <- if (input$geo_niva == "kommun")
@@ -201,6 +233,11 @@ mod_gymnasiet_server <- function(id) {
       dplyr::filter(data_bas(), ar == as.integer(input$ar))
     })
 
+    # Enskilda program (för stapel/trend) – för elevdata filtreras aggregat-
+    # och totalrader bort; för antagningsdata returneras allt oförändrat.
+    data_bas_prog <- reactive({ elever_endast_program(data_bas()) })
+    data_ar_prog  <- reactive({ elever_endast_program(data_ar()) })
+
     program_vald <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
@@ -211,14 +248,20 @@ mod_gymnasiet_server <- function(id) {
                         program_vald(NULL)
                       }, ignoreInit = TRUE)
 
-    output$titel     <- renderText({ valt_indikator()$label })
     output$brodsmula <- renderText({
       omr <- gymnasiet_struktur[[req(input$omrade)]]$label
-      org <- input$organisationstyp
-      org_txt <- if (!is.null(org) && org != "_alla_") paste0(" · ", org) else ""
-      paste0("Gymnasiet › ", omr, " › ", valt_indikator()$label,
-             " · ", geo_label(), org_txt, " · ", req(input$ar))
+      paste0("Gymnasiet › ", omr, " › ", valt_indikator()$label)
     })
+
+    # Filtrering som ska synas i varje diagrams underrubrik. Driftsform tas bara
+    # med när man filtrerat (inte "Alla"). med_ar lägger till valt år.
+    filter_underrubrik <- function(med_ar = FALSE) {
+      bitar <- geo_label()
+      org <- input$organisationstyp
+      if (!is.null(org) && org != "_alla_") bitar <- c(bitar, org)
+      if (med_ar) bitar <- c(bitar, as.character(req(input$ar)))
+      paste(bitar, collapse = " · ")
+    }
 
     output$vy <- renderUI({
       ind <- valt_indikator()
@@ -226,24 +269,27 @@ mod_gymnasiet_server <- function(id) {
         return(div(class = "rd-info",
                    "Den här vyn är inte inlagd än – kommer i en senare version."))
       }
-      fluidRow(
-        column(
-          7,
-          tags$p(class = "rd-hint rd-hint--bar",
-                 "Klicka på en stapel i diagrammet för att se statistik för ett specifikt program."),
-          ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
-          uiOutput(ns("kon_kontroll"))
-        ),
-        column(
-          5,
-          div(class = "rd-subcard",
-              tags$h4("Utveckling över tid"),
-              ggiraph::girafeOutput(ns("d_trend"), height = "200px")),
-          div(class = "rd-subcard",
-              tags$h4("Andel efter programtyp och år"),
-              ggiraph::girafeOutput(ns("d_programtyp"), height = "240px"))
+      hint <- tags$p(class = "rd-hint rd-hint--bar",
+                     "Klicka på en stapel i diagrammet för att se statistik för ett specifikt program.")
+
+      if (valt_vy() == "dashboard") {
+        fluidRow(
+          column(7, hint,
+                 ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
+                 uiOutput(ns("kon_kontroll"))),
+          column(5,
+                 div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "250px")),
+                 div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_programtyp"), height = "300px")))
         )
-      )
+      } else {
+        # Årskurs och andel: stapel + en trend (ingen programtypsruta).
+        fluidRow(
+          column(7, hint,
+                 ggiraph::girafeOutput(ns("d_bar"), height = "470px")),
+          column(5,
+                 div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "300px")))
+        )
+      }
     })
 
     output$kon_kontroll <- renderUI({
@@ -260,31 +306,63 @@ mod_gymnasiet_server <- function(id) {
 
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      df <- data_ar()
+      df <- data_ar_prog()
       validate(need(nrow(df) > 0, "Inga data för valt urval."))
-      if (isTRUE(ind$kon) && kon_lage() == "kon") {
-        skapa_diagram_bar_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, input$ar)
+      sub <- filter_underrubrik(med_ar = TRUE)
+
+      if (valt_vy() == "arskurs") {
+        skapa_diagram_arskurs(df, input$ar, rubrik = ind$amne,
+                              underrubrik = sub, kalla = ind$kalla)
+      } else if (valt_vy() == "andel") {
+        skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
+                                rubrik = paste0(ind$amne, " efter program"),
+                                underrubrik = sub, kalla = ind$kalla)
+      } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
+        skapa_diagram_bar_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, input$ar,
+                              rubrik = paste0(ind$amne, " efter program"),
+                              underrubrik = sub, kalla = ind$kalla)
       } else {
-        skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar)
+        skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
+                          rubrik = paste0(ind$amne, " efter program"),
+                          underrubrik = sub, kalla = ind$kalla)
       }
     })
 
     output$d_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      df <- data_bas()
+      df <- data_bas_prog()
       validate(need(nrow(df) > 0, "Inga data."))
-      if (isTRUE(ind$kon) && kon_lage() == "kon") {
-        skapa_diagram_trend_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, program_vald())
+      prog <- program_vald()
+      rub  <- if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
+      else paste0(ind$amne, " – ", prog)
+      sub  <- filter_underrubrik()
+
+      if (valt_vy() == "arskurs") {
+        skapa_diagram_trend_arskurs(df, prog, rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      } else if (valt_vy() == "andel") {
+        skapa_diagram_trend_andel(df, ind$metrik, ind$vikt, ind$metrik_label, prog,
+                                  rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
+        skapa_diagram_trend_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, prog,
+                                rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       } else {
-        skapa_diagram_trend(df, ind$metrik, ind$metrik_label, program_vald())
+        skapa_diagram_trend(df, ind$metrik, ind$metrik_label, prog,
+                            rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       }
     })
 
     output$d_programtyp <- ggiraph::renderGirafe({
-      ind <- valt_indikator(); req(isTRUE(ind$klar))
+      ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "dashboard")
       df <- data_bas()
       validate(need(nrow(df) > 0, "Inga data."))
-      skapa_diagram_programtyp(df, ind$metrik, ind$metrik_label, program_vald())
+      skapa_diagram_programtyp(df, ind$metrik, ind$metrik_label, program_vald(),
+                               rubrik = paste0(ind$amne, " – andel efter programtyp"),
+                               underrubrik = filter_underrubrik(), kalla = ind$kalla)
+    })
+
+    output$karta_rubrik <- renderUI({
+      rubrik <- if (identical(input$geo_niva, "samverkansomrade")) "Samverkansområden" else "Kommuner"
+      tags$div(class = "rd-label", rubrik)
     })
 
     output$karta <- ggiraph::renderGirafe({
@@ -294,19 +372,13 @@ mod_gymnasiet_server <- function(id) {
       k
     })
 
-    output$kalla <- renderUI({
-      k <- valt_indikator()$kalla
-      if (is.null(k)) return(NULL)
-      div(class = "rd-caption", paste0("Källa: ", k))
-    })
-
     output$ladda_ner <- downloadHandler(
-      filename = function() paste0("gymnasiet_", input$indikator, "_", input$ar, ".xlsx"),
+      filename = function() paste0(input$omrade, "_", input$indikator, "_", input$ar, ".xlsx"),
       content  = function(file) skriv_gymnasie_excel(data_ar(), file)
     )
     output$ladda_ner_alla <- downloadHandler(
-      filename = function() "gymnasiet_hela_datasetet.xlsx",
-      content  = function(file) skriv_gymnasie_excel(hamta_gymnasiedata(), file)
+      filename = function() paste0(input$omrade, "_hela_datasetet.xlsx"),
+      content  = function(file) skriv_gymnasie_excel(aktuell_data(), file)
     )
   })
 }
