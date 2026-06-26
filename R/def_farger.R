@@ -89,5 +89,5 @@ RD_TOOLTIP_CSS <- paste0(
 )
 RD_HOVER_CSS        <- "fill:var(--rd-primary-dark);cursor:pointer;"
 RD_SELECT_CSS       <- "fill:var(--rd-primary-dark);"
-RD_KARTA_HOVER_CSS  <- "stroke:#1a1a2e;stroke-width:2.5;paint-order:stroke fill;cursor:pointer;"
-RD_KARTA_SELECT_CSS <- "stroke:#1a1a2e;stroke-width:3;paint-order:stroke fill;"
+RD_KARTA_HOVER_CSS  <- "filter:brightness(0.82);cursor:pointer;"
+RD_KARTA_SELECT_CSS <- "filter:brightness(0.68);"

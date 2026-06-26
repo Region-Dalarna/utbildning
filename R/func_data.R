@@ -64,16 +64,6 @@ hamta_gymnasiedata <- function(force = FALSE) {
 
 # Klassar gymnasieprogram-värdet i nivå, eftersom Skolverkets kolumn blandar
 # totaler, programtyper, enskilda program och introduktionsundertyper.
-.elever_niva <- function(program) {
-  dplyr::case_when(
-    program == "Nationella program"                                  ~ "total",
-    program %in% c("Högskoleförberedande program", "Yrkesprogram")   ~ "programtyp",
-    program %in% c("Introduktionsprogrammen", "Riksrekryterande utbildningar") ~ "ovrigt_agg",
-    grepl("^Introduktionsprogram,", program)                         ~ "introduktion_sub",
-    TRUE                                                             ~ "program"
-  )
-}
-
 # Tvättar elevtabellen: behåller Dalarnas kommunrader, härleder år, gör bred,
 # döper om mätkolumnerna, och sätter nivå + programtyp (programtyp tas ur
 # datans egna aggregatrader, inte via join mot antagningsdatan).
@@ -150,11 +140,19 @@ rensa_elevdata <- function(rad) {
 
   df |>
     dplyr::mutate(
-      prog_niva  = .elever_niva(program),
+      prog_niva = dplyr::case_when(
+        program == "Nationella program"                                  ~ "total",
+        program %in% c("Högskoleförberedande program", "Yrkesprogram")  ~ "programtyp",
+        program %in% c("Introduktionsprogrammen",
+                       "Riksrekryterande utbildningar")                  ~ "ovrigt_agg",
+        grepl("^Introduktionsprogram,", program)                        ~ "introduktion_sub",
+        TRUE                                                            ~ "program"
+      ),
       programtyp = dplyr::case_when(
         program == "Högskoleförberedande program" ~ "Högskoleförberedande program",
         program == "Yrkesprogram"                 ~ "Yrkesprogram",
-        prog_niva == "ovrigt_agg"                 ~ "Övriga utbildningar",
+        program %in% c("Introduktionsprogrammen",
+                       "Riksrekryterande utbildningar") ~ "Övriga utbildningar",
         TRUE                                      ~ NA_character_
       )
     ) |>
@@ -180,7 +178,100 @@ elever_endast_program <- function(df) {
   else df
 }
 
-# ---- Excel-export ----------------------------------------------------------
+# ============================================================
+#  Genomströmning (Skolverket) – andel med examen inom 4 år
+#
+#  Datan är i långt format med en kolumn per variabel:
+#    läsår, regionkod, region, Gymnasieprogram, Typ av huvudman,
+#    Genomströmning, andel
+#  Kolumnen "Genomströmning" innehåller bara ett värde (beskrivning
+#  av måttet) och läses inte in. "andel" är redan färdigberäknad %.
+#
+#  Riket (regionkod "00") behålls separat för jämförelselinje i trend.
+# ============================================================
+.genomstromning_cache <- new.env(parent = emptyenv())
+
+rensa_genomstromning <- function(rad) {
+  # Kolumnnamnen innehåller mellanslag och svenska tecken – hanteras med backticks.
+  rad |>
+    dplyr::rename(
+      lasar            = `läsår`,
+      kommkod          = regionkod,
+      kommun           = region,
+      program          = gymnasieprogram,
+      organisationstyp = `typ av huvudman`
+    ) |>
+    dplyr::mutate(
+      kommkod = as.character(kommkod),
+      ar      = as.integer(substr(lasar, 1, 4)),
+      andel   = as.numeric(andel)
+    ) |>
+    # Behåll Dalarnas kommuner (4-siffriga koder 20xx) + Riket (00) + Dalarna
+    # som län (20) för ev. framtida bruk. Övriga län filtreras bort.
+    dplyr::filter(
+      (nchar(kommkod) == 4 & substr(kommkod, 1, 2) == "20") |
+        kommkod %in% c("00", "20")
+    ) |>
+    # Samtliga = aggregerad rad av Kommunal + Enskild. Vi behåller den som
+    # "Alla" för totalvyn men tar bort dubbletten när driftsform filtreras.
+    dplyr::mutate(
+      organisationstyp = dplyr::case_when(
+        organisationstyp == "Samtliga" ~ "Alla",
+        TRUE                           ~ organisationstyp
+      ),
+      geo_niva = dplyr::case_when(
+        kommkod == "00" ~ "riket",
+        kommkod == "20" ~ "lan",
+        TRUE            ~ "kommun"
+      ),
+      prog_niva = dplyr::case_when(
+        program %in% c("Gymnasieskolan totalt", "Nationella program",
+                       "Riksrekryterande utbildningar")        ~ "total",
+        program %in% c("Högskoleförberedande program",
+                       "Yrkesprogram", "Introduktionsprogram") ~ "programtyp",
+        TRUE                                                   ~ "program"
+      ),
+      programtyp = dplyr::case_when(
+        program == "Högskoleförberedande program" ~ "Högskoleförberedande program",
+        program == "Yrkesprogram"                 ~ "Yrkesprogram",
+        program == "Introduktionsprogram"         ~ "Övriga utbildningar",
+        TRUE                                      ~ NA_character_
+      )
+    ) |>
+    dplyr::left_join(kommun_samverkan, by = "kommkod") |>
+    dplyr::select(ar, lasar, kommkod, kommun, samverkansomrade,
+                  program, organisationstyp, geo_niva, prog_niva,
+                  programtyp, andel)
+}
+
+hamta_genomstromning <- function(force = FALSE) {
+  if (force || is.null(.genomstromning_cache$df)) {
+    con <- shiny_uppkoppling_las("oppna_data")
+    rad <- dplyr::tbl(con, dbplyr::in_schema("skolverket", "gymnasiet_genomstromning")) |>
+      dplyr::collect()
+    .genomstromning_cache$df <- rensa_genomstromning(rad)
+  }
+  .genomstromning_cache$df
+}
+
+# Plockar ut enskilda program (för stapel/trend), bort med aggregat.
+# geo_niva-filtret: bara kommunrader (inte riket/länet) används för
+# Dalarna-beräkningar; riket hanteras separat i diagramfunktionen.
+genomstromning_endast_program <- function(df) {
+  dplyr::filter(df, prog_niva == "program", geo_niva == "kommun")
+}
+
+# Riket-andel för ett givet program och år (för jämförelselinje).
+# Returnerar en data.frame med ar + andel_riket.
+genomstromning_riket <- function(df_full, program_val = "Nationella program",
+                                 org = "Alla") {
+  df_full |>
+    dplyr::filter(geo_niva == "riket", program == program_val,
+                  organisationstyp == org) |>
+    dplyr::select(ar, andel_riket = andel)
+}
+
+
 # Enkel men snygg formatering: fet rubrikrad i petrolblått, autobredd på
 # kolumner, fryst rubrikrad och autofilter. Kräver paketet openxlsx.
 skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet") {

@@ -427,3 +427,87 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
 
   .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
 }
+
+# ============================================================
+#  Genomströmning: trend med Dalarna + Riket som jämförelse
+# ============================================================
+
+# Trendlinje för genomströmning. df_dalarna är redan filtrerat till Dalarna
+# (kommunrader summerade), df_riket är rikets rad (geo_niva == "riket").
+# program_sel = NULL -> alla program sammanslagen (viktat medel med antal
+# elever är okänt -> enkelt medel per år, ange i underrubrik).
+skapa_diagram_genomstromning_trend <- function(df_dalarna, df_riket,
+                                               program_sel = NULL,
+                                               rubrik = NULL,
+                                               underrubrik = NULL,
+                                               kalla = NULL) {
+  # Dalarna: medel per år (datan är redan en andel per program/kommunkombination).
+  d_dal <- df_dalarna |>
+    dplyr::group_by(ar) |>
+    dplyr::summarise(andel = mean(andel, na.rm = TRUE), .groups = "drop") |>
+    dplyr::mutate(serie = "Dalarna",
+                  tooltip = paste0("Dalarna ", ar, ": ",
+                                   scales::number(andel, accuracy = 0.1), " %"))
+
+  d_rik <- df_riket |>
+    dplyr::rename(andel = andel_riket) |>
+    dplyr::mutate(serie = "Riket",
+                  tooltip = paste0("Riket ", ar, ": ",
+                                   scales::number(andel, accuracy = 0.1), " %"))
+
+  d <- dplyr::bind_rows(d_dal, d_rik) |>
+    dplyr::filter(!is.na(andel))
+
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3))
+
+  serie_farger <- c("Dalarna" = RD_PRIMARY, "Riket" = RD_TEXT_MUTED)
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel,
+                                       color = serie, group = serie)) +
+    ggplot2::geom_line(linewidth = 0.9) +
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.4) +
+    ggplot2::scale_color_manual(values = serie_farger, name = NULL) +
+    ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(labels = function(x) paste0(x, " %"),
+                                limits = c(0, NA)) +
+    ggplot2::labs(x = NULL, y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position  = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+
+  .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
+}
+
+# Stapel per program – genomströmningsandel för valt år i Dalarna.
+skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
+                                             rubrik = NULL,
+                                             underrubrik = NULL,
+                                             kalla = NULL) {
+  d <- df |>
+    dplyr::group_by(program) |>
+    dplyr::summarise(andel = mean(andel, na.rm = TRUE), .groups = "drop") |>
+    dplyr::filter(!is.na(andel)) |>
+    dplyr::mutate(
+      program = forcats::fct_reorder(program, andel),
+      tooltip = paste0("<b>", program, "</b><br/>",
+                       .metrik_ar("Andel med examen", ar), ": ",
+                       scales::number(andel, accuracy = 0.1), " %"),
+      data_id = as.character(program))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = program)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = data_id),
+      fill = RD_PRIMARY, width = 0.74) +
+    ggplot2::scale_x_continuous(
+      labels = function(x) paste0(x, " %"),
+      expand = ggplot2::expansion(mult = c(0, 0.04))) +
+    ggplot2::labs(x = "Andel med examen (%)", y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla)) +
+    .rd_tema()
+
+  .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
+}
