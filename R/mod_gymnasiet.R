@@ -61,7 +61,16 @@ gymnasiet_struktur <- list(
   resultat = list(
     label = "Resultat & examen",
     indikatorer = list(
-      examen = list(label = "Andel med examen", klar = FALSE, kalla = "Skolverket")
+      genomstromning = list(
+        label        = "Andel med examen",
+        klar         = TRUE,
+        vy           = "genomstromning",
+        kon          = FALSE,
+        amne         = "Andel gymnasieelever med examen inom 4 år",
+        metrik       = "andel",
+        metrik_label = "Andel med examen (%)",
+        kalla        = "Skolverket"
+      )
     )
   ),
   etablering = list(
@@ -103,7 +112,7 @@ mod_gymnasiet_ui <- function(id) {
 
         shinyWidgets::radioGroupButtons(
           inputId = ns("geo_niva"), label = "Geografisk indelning",
-          choices = c("Kommun" = "kommun", "Samverkansområde" = "samverkansomrade"),
+          choices = c("Kommuner" = "kommun", "Samverkansområden" = "samverkansomrade"),
           selected = "kommun"
         ),
         shinyWidgets::pickerInput(
@@ -159,12 +168,18 @@ mod_gymnasiet_server <- function(id) {
     # Väljer datakälla utifrån statistikområde: Elever -> elevtabellen,
     # övriga områden -> antagningsdatan.
     aktuell_data <- reactive({
-      if (identical(input$omrade, "elever")) hamta_gymnasie_elever() else hamta_gymnasiedata()
+      omr <- input$omrade
+      if (omr == "elever")    hamta_gymnasie_elever()
+      else if (omr == "resultat") hamta_genomstromning()
+      else                    hamta_gymnasiedata()
     })
     ar_elever <- reactive({ identical(input$omrade, "elever") })
 
     output$org_ui <- renderUI({
       typer <- sort(unique(stats::na.omit(aktuell_data()$organisationstyp)))
+      # Filtrera bort ev. "Alla"-rad ur datan (genomströmning har en sådan)
+      # så att det bara finns ett manuellt tillagt "Alla" överst.
+      typer <- typer[!typer %in% c("Alla", "Samtliga")]
       shinyWidgets::radioGroupButtons(
         inputId = ns("organisationstyp"), label = "Driftsform",
         choices = c("Alla" = "_alla_", stats::setNames(typer, typer)), selected = "_alla_"
@@ -172,8 +187,20 @@ mod_gymnasiet_server <- function(id) {
     })
 
     output$ar_ui <- renderUI({
-      ar <- sort(unique(aktuell_data()$ar), decreasing = TRUE)
-      selectInput(ns("ar"), "År", choices = ar, selected = max(ar))
+      d <- aktuell_data()
+      if (valt_vy() == "genomstromning") {
+        # Visa läsår (t.ex. "2021/22") men spara startåret som value för filtrering
+        lasar_per_ar <- d |>
+          dplyr::filter(geo_niva %in% c("lan", "kommun")) |>
+          dplyr::distinct(ar, lasar) |>
+          dplyr::arrange(dplyr::desc(ar))
+        choices <- stats::setNames(lasar_per_ar$ar, lasar_per_ar$lasar)
+        selectInput(ns("ar"), "Startläsår", choices = choices,
+                    selected = lasar_per_ar$ar[1])
+      } else {
+        ar <- sort(unique(d$ar), decreasing = TRUE)
+        selectInput(ns("ar"), "År", choices = ar, selected = max(ar))
+      }
     })
 
     observeEvent(input$geo_niva, {
@@ -235,8 +262,51 @@ mod_gymnasiet_server <- function(id) {
 
     # Enskilda program (för stapel/trend) – för elevdata filtreras aggregat-
     # och totalrader bort; för antagningsdata returneras allt oförändrat.
-    data_bas_prog <- reactive({ elever_endast_program(data_bas()) })
-    data_ar_prog  <- reactive({ elever_endast_program(data_ar()) })
+    data_bas_prog <- reactive({
+      if (valt_vy() == "genomstromning")
+        genomstromning_endast_program(data_bas())
+      else
+        elever_endast_program(data_bas())
+    })
+    data_ar_prog <- reactive({
+      if (valt_vy() == "genomstromning")
+        genomstromning_endast_program(data_ar())
+      else
+        elever_endast_program(data_ar())
+    })
+
+    # Genomströmning: Dalarna-data.
+    # Vid "Hela Dalarna": använd länets aggregerade rad (geo_niva == "lan"),
+    # vilket är Skolverkets korrekt viktade Dalarna-total.
+    # Vid specifik kommun/område: filtrera kommunraderna som vanligt.
+    genomstromning_dalarna <- reactive({
+      req(valt_vy() == "genomstromning")
+      d   <- aktuell_data()
+      gv  <- input$geo_val
+      org <- input$organisationstyp
+      org_filter <- if (!is.null(org) && org != "_alla_") org else "Alla"
+
+      if (is.null(gv) || gv == "_alla_") {
+        # Hela Dalarna: Skolverkets länssummering (geo_niva == "lan")
+        d |> dplyr::filter(geo_niva == "lan", organisationstyp == org_filter)
+      } else if (input$geo_niva == "kommun") {
+        d |> dplyr::filter(geo_niva == "kommun", kommkod == gv,
+                           organisationstyp == org_filter)
+      } else {
+        d |> dplyr::filter(geo_niva == "kommun", samverkansomrade == gv,
+                           organisationstyp == org_filter)
+      }
+    })
+
+    # Riket-serien för trenddiagrammet. Programmet väljs baserat på valt
+    # program (klickval) eller "Nationella program" som standard.
+    genomstromning_riket_serie <- reactive({
+      req(valt_vy() == "genomstromning")
+      prog <- if (!is.null(program_vald())) program_vald() else "Nationella program"
+      org  <- input$organisationstyp
+      org_r <- if (is.null(org) || org == "_alla_") "Alla" else org
+      genomstromning_riket(aktuell_data(), program_val = prog, org = org_r)
+    })
 
     program_vald <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
@@ -281,6 +351,15 @@ mod_gymnasiet_server <- function(id) {
                  div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "250px")),
                  div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_programtyp"), height = "300px")))
         )
+      } else if (valt_vy() == "genomstromning") {
+        # Stapel per program (vänster) + trendlinje Dalarna vs Riket (höger).
+        fluidRow(
+          column(7, hint,
+                 ggiraph::girafeOutput(ns("d_bar"), height = "470px")),
+          column(5,
+                 div(class = "rd-subcard",
+                     ggiraph::girafeOutput(ns("d_genomstromning_trend"), height = "300px")))
+        )
       } else {
         # Årskurs och andel: stapel + en trend (ingen programtypsruta).
         fluidRow(
@@ -310,7 +389,18 @@ mod_gymnasiet_server <- function(id) {
       validate(need(nrow(df) > 0, "Inga data för valt urval."))
       sub <- filter_underrubrik(med_ar = TRUE)
 
-      if (valt_vy() == "arskurs") {
+      if (valt_vy() == "genomstromning") {
+        df_gs <- genomstromning_dalarna() |>
+          dplyr::filter(ar == as.integer(req(input$ar)),
+                        prog_niva == "program")
+        validate(need(nrow(df_gs) > 0, "Inga data för valt urval."))
+        # Visa läsår (t.ex. "2021/22") i underrubriken i stället för bara startåret
+        lasar_txt <- if (nrow(df_gs) > 0) df_gs$lasar[1] else as.character(input$ar)
+        sub_gs <- paste0(filter_underrubrik(), " · startläsår ", lasar_txt)
+        skapa_diagram_genomstromning_bar(df_gs, input$ar,
+                                         rubrik = ind$amne,
+                                         underrubrik = sub_gs, kalla = ind$kalla)
+      } else if (valt_vy() == "arskurs") {
         skapa_diagram_arskurs(df, input$ar, rubrik = ind$amne,
                               underrubrik = sub, kalla = ind$kalla)
       } else if (valt_vy() == "andel") {
@@ -328,6 +418,25 @@ mod_gymnasiet_server <- function(id) {
       }
     })
 
+    output$d_genomstromning_trend <- ggiraph::renderGirafe({
+      ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "genomstromning")
+      df_dal  <- genomstromning_dalarna()
+      validate(need(nrow(df_dal) > 0, "Inga data."))
+      df_rik  <- genomstromning_riket_serie()
+      prog    <- program_vald()
+      rub     <- if (is.null(prog)) ind$amne else prog
+      # Senaste läsåret ur datan (t.ex. "2021/22") för underrubriken
+      senaste_lasar <- df_dal$lasar[which.max(df_dal$ar)]
+      sub     <- paste0(filter_underrubrik(), " · startläsår ", senaste_lasar)
+      df_prog <- if (is.null(prog))
+        dplyr::filter(df_dal, program == "Nationella program")
+      else
+        dplyr::filter(df_dal, program == prog)
+      skapa_diagram_genomstromning_trend(df_prog, df_rik,
+                                         rubrik = rub, underrubrik = sub,
+                                         kalla = ind$kalla)
+    })
+
     output$d_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
       df <- data_bas_prog()
@@ -335,7 +444,9 @@ mod_gymnasiet_server <- function(id) {
       prog <- program_vald()
       rub  <- if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
       else paste0(ind$amne, " – ", prog)
-      sub  <- filter_underrubrik()
+      # Underrubrik: filter + det senaste valda året (trenddiagrammet visar
+      # alla år men filtret gäller driftsform och geografi).
+      sub  <- paste0(filter_underrubrik(), " · t.o.m. ", req(input$ar))
 
       if (valt_vy() == "arskurs") {
         skapa_diagram_trend_arskurs(df, prog, rubrik = rub, underrubrik = sub, kalla = ind$kalla)
@@ -357,7 +468,8 @@ mod_gymnasiet_server <- function(id) {
       validate(need(nrow(df) > 0, "Inga data."))
       skapa_diagram_programtyp(df, ind$metrik, ind$metrik_label, program_vald(),
                                rubrik = paste0(ind$amne, " – andel efter programtyp"),
-                               underrubrik = filter_underrubrik(), kalla = ind$kalla)
+                               underrubrik = paste0(filter_underrubrik(), " · t.o.m. ", req(input$ar)),
+                               kalla = ind$kalla)
     })
 
     output$karta_rubrik <- renderUI({

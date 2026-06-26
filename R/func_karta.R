@@ -1,31 +1,23 @@
 # ============================================================
 #  func_karta.R
-#  Liten referenskarta: Dalarnas kommuner som polygoner, färgade
-#  efter samverkansområde. Ingen bakgrundskarta (bara polygoner).
+#  Liten referenskarta: Dalarnas kommuner/samverkansområden.
 #
-#  Geometrin hämtas ur produktionsdatabasen (geodata.karta.kommun_scb)
-#  via shiny_uppkoppling_las("geodata") och cachas per R-process.
-#  Renderas via ggiraph (samma stack som diagrammen). Kräver paketet sf
-#  och hjälparen df_till_sf(); saknas något, eller om läsningen misslyckas,
-#  returneras NULL och appen visar en liten fallback-text i stället för att
-#  krascha.
+#  Markeringen vid hover/val sker genom att YTAN mörknar
+#  (RD_KARTA_HOVER/SELECT_CSS = filter:brightness). Det undviker
+#  kant-artefakter helt: en stroke täcks annars av grannpolygoner
+#  som ritas senare, och i samverkansläge skulle varje kommun-form
+#  få sin egen kant. Den yttre svarta områdesgränsen ritas i stället
+#  som ett eget, permanent lager från den sammanslagna geometrin.
 # ============================================================
 
-# Färgerna SAMVERKAN_FARGER definieras centralt i def_farger.R (läses ur CSS).
-
-# Enkel processcache så geometrin bara hämtas en gång.
 .geo_cache <- new.env(parent = emptyenv())
 
 .las_kommun_geometri <- function() {
   if (!requireNamespace("sf", quietly = TRUE)) return(NULL)
-
-  # Hämta kommunpolygonerna ur geodata-databasen. df_till_sf() är er egen
-  # helper som gör om den hämtade tabellen till ett sf-objekt. Vi döper om
-  # knkod/knnamn till app-namnen kommkod/kommun.
   geo <- tryCatch(
     dplyr::tbl(shiny_uppkoppling_las("geodata"),
                dbplyr::in_schema("karta", "kommun_scb")) |>
-      dplyr::filter(str_sub(knkod, 1, 2) == "20") |>   # Dalarnas kommuner (länskod 20)
+      dplyr::filter(str_sub(knkod, 1, 2) == "20") |>
       dplyr::collect() |>
       df_till_sf() |>
       dplyr::rename(kommkod = knkod, kommun = knnamn) |>
@@ -33,7 +25,6 @@
     error = function(e) NULL
   )
   if (is.null(geo)) return(NULL)
-
   geo$kommkod <- as.character(geo$kommkod)
   dplyr::left_join(geo, kommun_samverkan, by = "kommkod")
 }
@@ -43,13 +34,6 @@ hamta_kommun_geometri <- function() {
   .geo_cache$geo
 }
 
-# niva: "kommun" eller "samverkansomrade".
-# Kommunläge: kommunerna var för sig (enfärgade, vita kommungränser), inga
-#   samverkansområden syns. Klick väljer kommun.
-# Samverkansläge: kommunerna inom samma område slås ihop (inre gränser tas bort)
-#   och färgas per område. Klick väljer hela området.
-# Markeringen sköts av ggiraphs urval (klick), så ett klick på en redan vald yta
-# avmarkerar (-> hela Dalarna).
 skapa_karta_samverkan <- function(niva = "kommun") {
   geo <- hamta_kommun_geometri()
   if (is.null(geo)) return(NULL)
@@ -69,29 +53,28 @@ skapa_karta_samverkan <- function(niva = "kommun") {
   }
 
   if (niva == "samverkansomrade") {
-    # Slå ihop kommunerna till ett område-polygon (inre gränser försvinner).
+    # Sammanslagen geometri per område (för de yttre gränserna).
     omr <- geo |>
       dplyr::group_by(samverkansomrade) |>
       dplyr::summarise(.groups = "drop")
 
-    # Tooltip på det interaktiva lagret: visa kommunnamn + område när man hovrar.
-    geo$tooltip <- paste0("<b>", geo$kommun, "</b><br/>", geo$samverkansomrade)
+    # Tooltip: område fetstilt överst, kommun under.
+    geo$tooltip <- paste0(
+      "<b style='font-size:1.05em'>", geo$samverkansomrade, "</b><br/>",
+      geo$kommun)
 
     g <- ggplot2::ggplot() +
-      # Lager 1: områden (interaktivt, klickbart, ger urval)
-      ggiraph::geom_sf_interactive(
-        data = omr,
-        ggplot2::aes(fill = samverkansomrade, data_id = samverkansomrade,
-                     tooltip = samverkansomrade),
-        color = NA) +                                    # inga synliga gränser här …
-      # Lager 2: kommungränser (svaga, ej interaktiva)
-      ggplot2::geom_sf(
-        data = geo, fill = NA, color = "white", linewidth = 0.25, alpha = 0.6) +
-      # Lager 3: hover/tooltip på kommunnivå (transparent fyll, interaktivt)
+      # Lager 1: kommun-ytor färgade per område (interaktiva). Hover/val mörknar
+      # hela området eftersom alla kommuner delar data_id = samverkansomrade.
       ggiraph::geom_sf_interactive(
         data = geo,
-        ggplot2::aes(tooltip = tooltip, data_id = samverkansomrade),
-        fill = NA, color = NA) +                         # syns inte, men fångar hover
+        ggplot2::aes(fill = samverkansomrade, tooltip = tooltip,
+                     data_id = samverkansomrade),
+        color = NA) +
+      # Lager 2: svaga vita kommungränser (inuti området), ej interaktiva.
+      ggplot2::geom_sf(data = geo, fill = NA, color = "white", linewidth = 0.3) +
+      # Lager 3: yttre områdesgränser, svarta, permanenta, ej interaktiva.
+      ggplot2::geom_sf(data = omr, fill = NA, color = "#1a1a1a", linewidth = 0.7) +
       ggplot2::scale_fill_manual(values = SAMVERKAN_FARGER, name = NULL) +
       ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
       ggplot2::theme_void(base_size = 11) +
@@ -104,8 +87,8 @@ skapa_karta_samverkan <- function(niva = "kommun") {
     return(gemensam_girafe(g))
   }
 
-  # Kommunläge: enfärgade kommuner, vita gränser, ingen områdesfärg/legend.
-  geo$tooltip <- paste0("<b>", geo$kommun, "</b><br/>", geo$samverkansomrade)
+  # Kommunläge: enfärgade kommuner, vita gränser. Hover/val mörknar kommunen.
+  geo$tooltip <- paste0("<b>", geo$kommun, "</b>")
 
   g <- ggplot2::ggplot(geo) +
     ggiraph::geom_sf_interactive(
