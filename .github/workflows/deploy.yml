@@ -56,3 +56,7 @@ jobs:
             echo "Ingen systemd-tjänst med namnet 'shiny-server' hittades. Hoppar över restart."
           fi
 
+      - name: Regenerera landningssida
+        run: |
+          sudo /usr/local/bin/generera_landningssida.sh || echo "Varning: kunde inte regenerera landningssidan (ej kritiskt fel)"
+
