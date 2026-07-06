@@ -2,6 +2,7 @@ source('global.R')
 
 shinyUI(
   fluidPage(
+    shinyjs::useShinyjs(),
     tags$head(
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),
       tags$link(rel = 'stylesheet', type = 'text/css', href = 'regiondalarna_ruf.css'),

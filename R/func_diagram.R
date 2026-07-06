@@ -65,6 +65,8 @@
   opts <- list(
     ggiraph::opts_hover(css = RD_HOVER_CSS),
     ggiraph::opts_tooltip(css = RD_TOOLTIP_CSS),
+    # Fyll hela containerbredden (annars centreras SVG:n med vita ytor på sidorna)
+    ggiraph::opts_sizing(rescale = TRUE, width = 1),
     ggiraph::opts_toolbar(saveaspng = TRUE,
                           hidden = c("lasso_select", "lasso_deselect"))
   )
@@ -113,11 +115,11 @@ skapa_diagram_bar_kon <- function(df, metrik_kv, metrik_man, metrik_label, ar = 
     dplyr::group_by(program) |>
     dplyr::summarise(
       Kvinnor = sum(.data[[metrik_kv]],  na.rm = TRUE),
-      Män     = sum(.data[[metrik_man]], na.rm = TRUE),
+      `Män`   = sum(.data[[metrik_man]], na.rm = TRUE),
       .groups = "drop") |>
-    dplyr::mutate(tot = Kvinnor + Män) |>
+    dplyr::mutate(tot = Kvinnor + `Män`) |>
     dplyr::filter(tot > 0) |>
-    tidyr::pivot_longer(c(Kvinnor, Män), names_to = "kon", values_to = "antal") |>
+    tidyr::pivot_longer(c(Kvinnor, `Män`), names_to = "kon", values_to = "antal") |>
     dplyr::mutate(
       program = forcats::fct_reorder(program, tot),
       tooltip = paste0("<b>", program, "</b><br/>", kon, " · ",
@@ -169,9 +171,9 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
     dplyr::group_by(ar) |>
     dplyr::summarise(
       Kvinnor = sum(.data[[metrik_kv]],  na.rm = TRUE),
-      Män     = sum(.data[[metrik_man]], na.rm = TRUE),
+      `Män`   = sum(.data[[metrik_man]], na.rm = TRUE),
       .groups = "drop") |>
-    tidyr::pivot_longer(c(Kvinnor, Män), names_to = "kon", values_to = "antal") |>
+    tidyr::pivot_longer(c(Kvinnor, `Män`), names_to = "kon", values_to = "antal") |>
     dplyr::mutate(tooltip = paste0(kon, " · ", metrik_label, " ", ar, ": ", antal))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = antal, color = kon, group = kon)) +
@@ -510,4 +512,243 @@ skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
     .rd_tema()
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
+}
+
+# ============================================================
+#  Etablering: grupperad stapel (antal år) + Dalarna vs Riket-trend
+# ============================================================
+
+# Etiketter för antal år efter examen
+.ar_efter_etiketter <- c("1" = "1 år", "3" = "3 år", "5" = "5 år", "7" = "7 år")
+ANTAL_AR_FARGER <- c(
+  "1 år" = rd_farg("rd-blue-light", "#8edded"),
+  "3 år" = rd_farg("rd-accent",     "#54a1bd"),
+  "5 år" = rd_farg("rd-primary",    "#158daf"),
+  "7 år" = rd_farg("rd-blue-deep",  "#0074a2")
+)
+
+# Liggande stapel. antal_ar_val = 1/3/5/7 -> en stapel per program för det
+# valda uppföljningsåret (+ Riket-referenslinje). antal_ar_val = "alla" ->
+# grupperade staplar med en stapel per uppföljningsår (1/3/5/7).
+skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
+                                         antal_ar_val = 3,
+                                         riket_andel = NULL,
+                                         rubrik = NULL, underrubrik = NULL,
+                                         kalla = NULL) {
+
+  # ---- Läge: alla uppföljningsår som grupperade staplar -------------------
+  if (identical(as.character(antal_ar_val), "alla")) {
+    d <- df |>
+      dplyr::mutate(ar_etikett = .ar_efter_etiketter[as.character(antal_ar)]) |>
+      dplyr::filter(!is.na(ar_etikett)) |>
+      dplyr::group_by(namn, ar_etikett) |>
+      dplyr::summarise(status_sum = sum(.data[[metrik]], na.rm = TRUE),
+                       antal_sum  = sum(antal, na.rm = TRUE),
+                       .groups = "drop") |>
+      dplyr::mutate(andel = dplyr::if_else(antal_sum > 0,
+                                           status_sum / antal_sum, NA_real_)) |>
+      dplyr::filter(!is.na(andel))
+
+    if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
+
+    # Sortera program på medel över alla år
+    namn_order <- d |>
+      dplyr::group_by(namn) |>
+      dplyr::summarise(m = mean(andel, na.rm = TRUE), .groups = "drop") |>
+      dplyr::arrange(m) |>
+      dplyr::pull(namn)
+
+    d <- d |>
+      dplyr::mutate(
+        namn       = factor(namn, levels = namn_order),
+        ar_etikett = factor(ar_etikett, levels = c("1 år", "3 år", "5 år", "7 år")),
+        tooltip    = paste0("<b>", namn, "</b><br/>", ar_etikett, ": ",
+                            scales::percent(andel, accuracy = 0.1)))
+
+    g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = namn, fill = ar_etikett)) +
+      ggiraph::geom_col_interactive(
+        ggplot2::aes(tooltip = tooltip, data_id = paste(namn, ar_etikett)),
+        position = ggplot2::position_dodge(width = 0.8), width = 0.72) +
+      ggplot2::scale_fill_manual(values = ANTAL_AR_FARGER, name = "År efter examen") +
+      ggplot2::scale_x_continuous(
+        labels = scales::percent_format(accuracy = 1),
+        expand = ggplot2::expansion(mult = c(0, 0.04)), limits = c(0, 1)) +
+      ggplot2::labs(x = metrik_label, y = NULL,
+                    title = rubrik, subtitle = underrubrik,
+                    caption = .kalltext(kalla)) +
+      .rd_tema() +
+      ggplot2::theme(legend.position = "top")
+
+    return(.girafe_std(g, width_svg = 11,
+                       height_svg = max(6.5, dplyr::n_distinct(d$namn) * 0.6 + 1.5),
+                       selection = TRUE))
+  }
+
+  # ---- Läge: ett uppföljningsår (+ Riket-referenslinje) -------------------
+  d <- df |>
+    dplyr::filter(antal_ar == as.integer(antal_ar_val)) |>
+    dplyr::group_by(namn, program) |>
+    dplyr::summarise(status_sum = sum(.data[[metrik]], na.rm = TRUE),
+                     antal_sum  = sum(antal, na.rm = TRUE),
+                     .groups = "drop") |>
+    dplyr::mutate(andel = dplyr::if_else(antal_sum > 0,
+                                         status_sum / antal_sum, NA_real_)) |>
+    dplyr::filter(!is.na(andel))
+
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
+
+  # Sortera på andel, men håll inriktningar grupperade under sitt program.
+  # program == namn när vi visar på programnivå.
+  prog_order <- d |>
+    dplyr::group_by(program) |>
+    dplyr::summarise(prog_andel = sum(status_sum) / sum(antal_sum), .groups = "drop") |>
+    dplyr::arrange(prog_andel) |>
+    dplyr::pull(program)
+
+  d <- d |>
+    dplyr::mutate(
+      program = factor(program, levels = prog_order),
+      namn    = forcats::fct_reorder2(namn, program, andel,
+                                      .fun = function(p, a) as.integer(p) + a * 0.01)
+    ) |>
+    dplyr::mutate(
+      tooltip = paste0("<b>", namn, "</b><br/>",
+                       antal_ar_val, " år efter examen: ",
+                       scales::percent(andel, accuracy = 0.1))
+    )
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = namn)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = as.character(namn)),
+      fill = RD_PRIMARY, width = 0.74) +
+    ggplot2::scale_x_continuous(
+      labels = scales::percent_format(accuracy = 1),
+      expand = ggplot2::expansion(mult = c(0, 0.04)),
+      limits = c(0, 1)) +
+    ggplot2::labs(x = metrik_label, y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla)) +
+    .rd_tema()
+
+  # Riket-referenslinje (streckad) om tillgänglig
+  if (!is.null(riket_andel) && !is.na(riket_andel)) {
+    g <- g +
+      ggplot2::geom_vline(xintercept = riket_andel, linetype = "dashed",
+                          color = RD_TEXT_MUTED, linewidth = 0.7) +
+      ggplot2::annotate("text", x = riket_andel, y = Inf,
+                        label = paste0("Riket ", scales::percent(riket_andel, accuracy = 0.1)),
+                        hjust = -0.08, vjust = 1.5, size = 2.8,
+                        color = RD_TEXT_MUTED)
+  }
+
+  .girafe_std(g, width_svg = 11, height_svg = max(5, nrow(d) * 0.36 + 1.8),
+              selection = TRUE)
+}
+
+# Trendlinje: Dalarna vs Riket, ett mått, ett antal_ar-värde per serie.
+skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
+                                           metrik, metrik_label,
+                                           antal_ar_val = 3,
+                                           rubrik = NULL, underrubrik = NULL,
+                                           kalla = NULL) {
+  d_dal <- df_dalarna |>
+    dplyr::filter(antal_ar == antal_ar_val) |>
+    dplyr::group_by(ar) |>
+    dplyr::summarise(status_sum = sum(.data[[metrik]], na.rm = TRUE),
+                     antal_sum  = sum(antal, na.rm = TRUE),
+                     .groups = "drop") |>
+    dplyr::mutate(
+      andel   = dplyr::if_else(antal_sum > 0, status_sum / antal_sum, NA_real_),
+      serie   = "Dalarna",
+      tooltip = paste0("Dalarna ", ar, ": ", scales::percent(andel, accuracy = 0.1)))
+
+  d_rik <- df_riket |>
+    dplyr::filter(antal_ar == antal_ar_val) |>
+    dplyr::rename(andel = andel_riket) |>
+    dplyr::mutate(
+      serie   = "Riket",
+      tooltip = paste0("Riket ", ar, ": ", scales::percent(andel, accuracy = 0.1)))
+
+  d <- dplyr::bind_rows(d_dal, d_rik) |> dplyr::filter(!is.na(andel))
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+
+  # Mappa startår -> full examensperiod ("2014–2016") för x-axeletiketter.
+  # Hämtas ur df_dalarna som har exam_ar_interval.
+  ar_etik <- df_dalarna |>
+    dplyr::distinct(ar, exam_ar_interval) |>
+    dplyr::mutate(etikett = gsub("-", "\u2013", exam_ar_interval, fixed = TRUE))
+  etik_vekt <- stats::setNames(ar_etik$etikett, as.character(ar_etik$ar))
+
+  serie_farger <- c("Dalarna" = RD_PRIMARY, "Riket" = RD_TEXT_MUTED)
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel,
+                                       color = serie, group = serie,
+                                       linetype = serie)) +
+    ggplot2::geom_line(linewidth = 0.9) +
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.4) +
+    ggplot2::scale_color_manual(values = serie_farger, name = NULL) +
+    ggplot2::scale_linetype_manual(
+      values = c("Dalarna" = "solid", "Riket" = "dashed"), guide = "none") +
+    ggplot2::scale_x_continuous(
+      breaks = sort(unique(d$ar)),
+      labels = function(x) etik_vekt[as.character(x)]) +
+    ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                                limits = c(0, NA)) +
+    ggplot2::labs(x = "Examensperiod", y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position    = "top",
+                   axis.text.x        = ggplot2::element_text(size = 7.5),
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+
+  .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
+}
+
+# ============================================================
+#  UI-hjälpare: gråa ut + inaktivera specifika knappar i en
+#  shinyWidgets radioGroupButtons. Manuell rekursion (ingen
+#  tagQuery) för full förutsägbarhet oavsett htmltools-version.
+#
+#  Hittar varje <label> som innehåller en <input> vars value
+#  finns i disabled_vals, inaktiverar input:en (disabled) och
+#  gråar labeln. Ett inaktiverat radio-input kan inte väljas.
+# ============================================================
+grada_radioknappar <- function(tag, disabled_vals) {
+  if (length(disabled_vals) == 0) return(tag)
+
+  walk <- function(node) {
+    if (!inherits(node, "shiny.tag")) return(node)
+
+    if (identical(node$name, "label") && length(node$children)) {
+      # Finns en input med value i disabled_vals bland barnen?
+      mal <- FALSE
+      for (ch in node$children) {
+        if (inherits(ch, "shiny.tag") && identical(ch$name, "input")) {
+          v <- ch$attribs$value
+          if (!is.null(v) && as.character(v) %in% disabled_vals) mal <- TRUE
+        }
+      }
+      if (mal) {
+        # Inaktivera input-barnen och gråa labeln
+        node$children <- lapply(node$children, function(ch) {
+          if (inherits(ch, "shiny.tag") && identical(ch$name, "input")) {
+            ch$attribs$disabled <- "disabled"
+          }
+          ch
+        })
+        gammal <- node$attribs$style
+        node$attribs$style <- paste0(
+          if (!is.null(gammal)) paste0(gammal, ";") else "",
+          "opacity:0.4;pointer-events:none;cursor:not-allowed;")
+        return(node)
+      }
+    }
+
+    if (length(node$children))
+      node$children <- lapply(node$children, walk)
+    node
+  }
+  walk(tag)
 }

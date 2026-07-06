@@ -185,3 +185,39 @@ html, body { overflow-x: hidden; }
   color: var(--rd-text-muted);
   margin-bottom: 14px;
 }
+
+/* ---- Årsknappar (etablering): actionButton-grupp ---- */
+.rd-arbtn-grupp { margin-bottom: 0.75rem; }
+.rd-arbtn-grupp .control-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.rd-arbtn-rad {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rd-arbtn {
+  background: #ffffff;
+  border: 1px solid var(--rd-primary, #158daf);
+  color: var(--rd-primary, #158daf);
+  border-radius: 4px;
+  padding: 2px 10px;
+}
+.rd-arbtn:hover { background: #eaf5f8; }
+.rd-arbtn-aktiv,
+.rd-arbtn-aktiv:hover {
+  background: var(--rd-primary, #158daf);
+  color: #ffffff;
+}
+/* Inaktiverade (saknar data): gråa och oklickbara. shinyjs::disabled
+   sätter attributet disabled på <button>, som vi stylar här. */
+.rd-arbtn[disabled],
+.rd-arbtn:disabled {
+  background: #f1f3f5;
+  border-color: #dee2e6;
+  color: #adb5bd;
+  cursor: not-allowed;
+  opacity: 1;
+}

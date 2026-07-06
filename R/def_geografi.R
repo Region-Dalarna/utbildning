@@ -51,9 +51,15 @@ kommun_samverkan <- tibble::tribble(
 )
 
 # ---- Färdiga val till väljarna ---------------------------------------------
-# Kommun: visa namn, returnera kommkod.
-geo_val_kommun <- setNames(dalarna_kommuner$kommkod, dalarna_kommuner$kommun)
+# Kommun: visa namn, returnera kommkod. Sorterat i svensk bokstavsordning
+# (å/ä/ö sist) via stringr::str_sort med svensk locale.
+geo_val_kommun <- {
+  namn_sorterade <- stringr::str_sort(dalarna_kommuner$kommun, locale = "sv")
+  idx <- match(namn_sorterade, dalarna_kommuner$kommun)
+  setNames(dalarna_kommuner$kommkod[idx], dalarna_kommuner$kommun[idx])
+}
 
-# Samverkansområde: visa = returnera namn.
-geo_val_samverkan <- sort(unique(kommun_samverkan$samverkansomrade))
+# Samverkansområde: visa = returnera namn. Svensk bokstavsordning.
+geo_val_samverkan <- stringr::str_sort(unique(kommun_samverkan$samverkansomrade),
+                                       locale = "sv")
 geo_val_samverkan <- setNames(geo_val_samverkan, geo_val_samverkan)
