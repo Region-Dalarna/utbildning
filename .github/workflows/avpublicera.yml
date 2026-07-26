@@ -56,10 +56,13 @@ jobs:
             sudo systemctl restart shiny-server && echo "Shiny Server omstartad."
           fi
 
-
-# (touch för workflow-registrering)
-
       - name: Regenerera landningssida
         run: |
-          sudo /usr/local/bin/generera_landningssida.sh || echo "Varning: kunde inte regenerera landningssidan (ej kritiskt fel)"
+          sudo -u shiny /usr/local/bin/generera_landningssida.sh || echo "Varning: kunde inte regenerera landningssidan (ej kritiskt fel)"
 
+      - name: Synka app-lista mot databasen
+        run: |
+          sudo -u shiny /usr/local/bin/synka_app_lista.sh || echo "Varning: kunde inte synka app-listan (ej kritiskt fel)"
+
+
+# (touch för workflow-registrering)
