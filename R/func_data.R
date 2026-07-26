@@ -49,9 +49,7 @@ hamta_gymnasiedata <- function(force = FALSE) {
     con <- shiny_uppkoppling_las("oppna_data")
     rad <- dplyr::tbl(con, dbplyr::in_schema("dkf", "gymnasieantagna")) |>
       dplyr::collect()
-    # Om shiny_uppkoppling_las() ger en vanlig DBI-anslutning (inte en pool)
-    # kan du frigöra den här:
-    # DBI::dbDisconnect(con)
+    DBI::dbDisconnect(con)
     .data_cache$df <- rensa_gymnasiedata(rad)
   }
   .data_cache$df
@@ -165,6 +163,7 @@ hamta_gymnasie_elever <- function(force = FALSE) {
     con <- shiny_uppkoppling_las("oppna_data")
     rad <- dplyr::tbl(con, dbplyr::in_schema("skolverket", "gymnasiet_elever")) |>
       dplyr::collect()
+    DBI::dbDisconnect(con)
     .elever_cache$df <- rensa_elevdata(rad)
   }
   .elever_cache$df
@@ -249,6 +248,7 @@ hamta_genomstromning <- function(force = FALSE) {
     con <- shiny_uppkoppling_las("oppna_data")
     rad <- dplyr::tbl(con, dbplyr::in_schema("skolverket", "gymnasiet_genomstromning")) |>
       dplyr::collect()
+    DBI::dbDisconnect(con)
     .genomstromning_cache$df <- rensa_genomstromning(rad)
   }
   .genomstromning_cache$df
@@ -271,6 +271,95 @@ genomstromning_riket <- function(df_full, program_val = "Nationella program",
     dplyr::select(ar, andel_riket = andel)
 }
 
+
+# ============================================================
+#  Etablering (SCB/RAKS) – uppföljning av gymnasieexaminerade
+#
+#  Kolumner: exam_ar_interval, uppf_ar_interval, antal_ar,
+#    programkod, regionkod, syss, stud, arblos, etabl,
+#    antal, region, gymnasieprogram, inriktning
+#
+#  antal_ar = 1/3/5/7 år efter examen.
+#  Datan är på individ-/cellnivå (en rad per person × bokommun × astkommun).
+#  Kolumnerna syss/stud/arblos/ovriga/etabl/antal är antal (inte andelar).
+#  syss+stud+arblos+ovriga ≈ antal (källans egna total).
+#  etabl är en delmängd (av syss) och summerar INTE med övriga till 100%.
+#  forvink_etabl = summerad förvärvsinkomst bland etablerade (kr).
+#  Aggregering sker i modulen via summering.
+# ============================================================
+.etablering_cache <- new.env(parent = emptyenv())
+
+rensa_etablering <- function(rad) {
+  rad |>
+    dplyr::rename(
+      bokommunkod  = kommun,
+      bokommun     = kommun_namn,
+      astkommunkod = astkommun,
+      astkommun    = astkommun_namn,
+      program          = gymnasieprogram,
+      organisationstyp = hman_namn,
+      kommkod      = regionkod,
+      kommun       = region
+    ) |>
+    dplyr::mutate(
+      kommkod = as.character(kommkod),
+      ar      = as.integer(substr(exam_ar_interval, 1, 4)),
+      syss    = as.numeric(syss),
+      stud    = as.numeric(stud),
+      arblos  = as.numeric(arblos),
+      ovriga  = as.numeric(ovriga),
+      etabl   = as.numeric(etabl),
+      antal   = as.numeric(antal),
+      forvink_etabl = as.numeric(forvink_etabl),
+      geo_niva = dplyr::case_when(
+        kommkod == "00" ~ "riket",
+        kommkod == "20" ~ "lan",
+        TRUE            ~ "kommun"
+      ),
+      prog_niva = dplyr::case_when(
+        program %in% c("Gymnasieskolan totalt", "Nationella program",
+                       "Yrkesprogram", "Högskoleförberedande program",
+                       "Introduktionsprogram")                  ~ "aggregat",
+        TRUE                                                    ~ "program"
+      )
+    ) |>
+    dplyr::left_join(kommun_samverkan, by = "kommkod") |>
+    dplyr::select(ar, exam_ar_interval, uppf_ar_interval, antal_ar,
+                  kommkod, kommun, samverkansomrade, program, inriktning,
+                  organisationstyp, bokommunkod, bokommun, astkommunkod, astkommun,
+                  forvink_etabl, geo_niva, prog_niva,
+                  syss, stud, arblos, ovriga, antal, etabl)
+}
+
+hamta_etablering <- function(force = FALSE) {
+  if (force || is.null(.etablering_cache$df)) {
+    con <- shiny_uppkoppling_las("sekretess", db_user = "shiny_las_sekretess")
+    rad <- dplyr::tbl(con, dbplyr::in_schema("mikro_db",
+                                             "gymnasiet_uppfoljning_raks")) |>
+      dplyr::collect()
+    DBI::dbDisconnect(con)
+    .etablering_cache$df <- rensa_etablering(rad)
+  }
+  .etablering_cache$df
+}
+
+# Riket-andel per program och antal_ar (för jämförelselinje i trend).
+# Om program_val = NULL returneras medel över alla program (för totalvyn).
+# Aggregerar genom att summera antal och beräkna andel = status/total.
+etablering_riket <- function(df_full, program_val = NULL, metrik) {
+  d <- df_full |> dplyr::filter(geo_niva == "riket")
+  if (!is.null(program_val)) d <- dplyr::filter(d, program == program_val)
+  d |>
+    dplyr::group_by(ar, antal_ar) |>
+    dplyr::summarise(
+      status_sum = sum(.data[[metrik]], na.rm = TRUE),
+      antal_sum  = sum(antal, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(andel_riket = dplyr::if_else(
+      antal_sum > 0, status_sum / antal_sum, NA_real_)) |>
+    dplyr::select(ar, antal_ar, andel_riket)
+}
 
 # Enkel men snygg formatering: fet rubrikrad i petrolblått, autobredd på
 # kolumner, fryst rubrikrad och autofilter. Kräver paketet openxlsx.
