@@ -20,19 +20,30 @@ gymnasiet_struktur <- list(
       platser_program = list(label = "Platser", klar = TRUE, kon = FALSE,
                              amne = "Gymnasieplatser",
                              metrik = "platser", metrik_label = "Antal platser",
-                             kalla = .KALLA_ANTAGNING),
+                             kalla = .KALLA_ANTAGNING,
+                             beskrivning = paste(
+                               "Det antal platser som utbildningsanordnarna har angivit",
+                               "när antagningsprocessen startar i januari.")),
       antagna_program = list(label = "Antagna", klar = TRUE, kon = TRUE,
                              amne = "Antagna gymnasieelever",
                              metrik = "antagna", metrik_kv = "antagna_kv", metrik_man = "antagna_man",
-                             metrik_label = "Antal antagna", kalla = .KALLA_ANTAGNING),
+                             metrik_label = "Antal antagna", kalla = .KALLA_ANTAGNING,
+                             beskrivning = paste(
+                               "Antalet antagna i början av september, när Gymnasieantagningen",
+                               "på Dalarnas kommunförbund lämnar över kommande programbyten med",
+                               "mera till skolorna.")),
       sokande_forsta  = list(label = "Förstahandssökande", klar = TRUE, kon = TRUE,
                              amne = "Förstahandssökande till gymnasiet",
                              metrik = "sok_1a", metrik_kv = "sok_1a_kv", metrik_man = "sok_1a_man",
-                             metrik_label = "Förstahandssökande", kalla = .KALLA_ANTAGNING),
+                             metrik_label = "Förstahandssökande", kalla = .KALLA_ANTAGNING,
+                             beskrivning = paste(
+                               "Antal förstahandssökande. Precis som Antagna är detta",
+                               "septembersiffror.")),
       outnyttjade     = list(label = "Outnyttjade platser", klar = TRUE, kon = FALSE,
                              amne = "Outnyttjade gymnasieplatser",
                              metrik = "lediga_platser", metrik_label = "Outnyttjade platser",
-                             kalla = .KALLA_ANTAGNING),
+                             kalla = .KALLA_ANTAGNING,
+                             beskrivning = "Skillnaden mellan Platser och Antagna."),
       antagningspoang = list(label = "Antagningspoäng", klar = FALSE, kalla = .KALLA_ANTAGNING)
     )
   ),
@@ -42,24 +53,40 @@ gymnasiet_struktur <- list(
       antal_elever  = list(label = "Antal elever", klar = TRUE, vy = "dashboard", kon = FALSE,
                            amne = "Antal gymnasieelever",
                            metrik = "antal_elever", metrik_label = "Antal elever",
-                           kalla = "Skolverket"),
+                           kalla = "Skolverket",
+                           beskrivning = paste(
+                             "Rapporten visar antal elever i gymnasieskolan fördelat per",
+                             "årskurs. Uppgifterna avser oktober det valda året. Redovisas",
+                             "totalt och per program.")),
       elever_arskurs = list(label = "Elever per årskurs", klar = TRUE, vy = "arskurs", kon = FALSE,
                             amne = "Gymnasieelever per årskurs",
                             metrik = "antal_elever", metrik_label = "Antal elever",
-                            kalla = "Skolverket"),
+                            kalla = "Skolverket",
+                            beskrivning = "Antal elever per årskurs totalt och per program."),
       andel_kvinnor = list(label = "Andel kvinnor", klar = TRUE, vy = "andel", kon = FALSE,
                            amne = "Andel kvinnor", metrik = "andel_kvinnor", vikt = "antal_elever",
-                           metrik_label = "Andel kvinnor (%)", kalla = "Skolverket"),
+                           metrik_label = "Andel kvinnor (%)", kalla = "Skolverket",
+                           beskrivning = "Andel kvinnor av alla elever totalt och per program."),
       andel_utl     = list(label = "Utländsk bakgrund", klar = TRUE, vy = "andel", kon = FALSE,
                            amne = "Andel med utländsk bakgrund", metrik = "andel_utl", vikt = "antal_elever",
-                           metrik_label = "Andel med utländsk bakgrund (%)", kalla = "Skolverket"),
+                           metrik_label = "Andel med utländsk bakgrund (%)", kalla = "Skolverket",
+                           beskrivning = paste(
+                             "Med utländsk bakgrund avses att eleven är född utomlands eller",
+                             "född i Sverige med två utlandsfödda föräldrar. Elever med okänd",
+                             "bakgrund räknas i denna statistik till elever med utländsk",
+                             "bakgrund. Med okänd bakgrund avses elever som inte var",
+                             "folkbokförda per den 30 september innevarande läsår. Redovisas",
+                             "totalt och per program.")),
       andel_hogutb  = list(label = "Högutbildade föräldrar", klar = TRUE, vy = "andel", kon = FALSE,
                            amne = "Andel med högutbildade föräldrar", metrik = "andel_hogutb", vikt = "antal_elever",
-                           metrik_label = "Andel med högutbildade föräldrar (%)", kalla = "Skolverket")
+                           metrik_label = "Andel med högutbildade föräldrar (%)", kalla = "Skolverket",
+                           beskrivning = paste(
+                             "Högutbildade föräldrar innebär att eleven har minst en förälder",
+                             "vars högsta utbildning är eftergymnasial."))
     )
   ),
   resultat = list(
-    label = "Resultat & examen",
+    label = "Genomströmning",
     indikatorer = list(
       genomstromning = list(
         label        = "Andel med examen",
@@ -69,7 +96,12 @@ gymnasiet_struktur <- list(
         amne         = "Andel gymnasieelever med examen inom 4 år",
         metrik       = "andel",
         metrik_label = "Andel med examen (%)",
-        kalla        = "Skolverket"
+        kalla        = "Skolverket",
+        beskrivning  = paste(
+          "För att få slutbetyg från gymnasieskolan krävs att eleven fått",
+          "betyg i alla kurser som ingår i programmet. Måttet för t.ex. år",
+          "2019 avser andelen av nybörjarna hösten 2019 som erhållit",
+          "slutbetyg t.o.m. läsåret 2021/2022.")
       )
     )
   ),
@@ -79,19 +111,38 @@ gymnasiet_struktur <- list(
       etabl = list(label = "Etablerade", klar = TRUE, vy = "etablering", kon = FALSE,
                    amne = "Etablerade på arbetsmarknaden",
                    metrik = "etabl", metrik_label = "Andel etablerade",
-                   kalla = "SCB/RAKS"),
+                   kalla = "SCB/RAKS",
+                   beskrivning = paste(
+                     "Det är endast personer som är anställda (helårsanställd,",
+                     "nyanställd, avgången eller delårsanställd) som kan definieras",
+                     "som etablerade. Personer som är egna företagare eller har",
+                     "fåmansaktiebolag kan i viss mån välja hur mycket ersättning de",
+                     "ska ta ut ur företagen, det vill säga styra sin egen",
+                     "företagarinkomst. Detta gör det i praktiken omöjligt att",
+                     "beräkna etablering för denna grupp på basis av inkomsten.",
+                     "Två definitioner har använts över tid: före år 2020 ett",
+                     "gränsvärde beräknat som 60 % av medianinkomsten för personer",
+                     "med kort förgymnasial utbildning, per åldersgrupp och kön; från",
+                     "och med år 2020 en inkomst på minst 3 inkomstbasbelopp. I båda",
+                     "fallen får personen heller inte ha haft arbetslöshetsersättning",
+                     "under året för att klassas som etablerad.")),
       syss  = list(label = "Sysselsatta", klar = TRUE, vy = "etablering", kon = FALSE,
                    amne = "Sysselsatta efter gymnasiet",
                    metrik = "syss", metrik_label = "Andel sysselsatta",
-                   kalla = "SCB/RAKS"),
+                   kalla = "SCB/RAKS",
+                   beskrivning = "Sysselsatt är den som har sin största inkomst från arbete."),
       stud  = list(label = "Studerande", klar = TRUE, vy = "etablering", kon = FALSE,
                    amne = "Studerande efter gymnasiet",
                    metrik = "stud", metrik_label = "Andel studerande",
-                   kalla = "SCB/RAKS"),
+                   kalla = "SCB/RAKS",
+                   beskrivning = "Studerande är den som har sin största inkomst från studier."),
       arblos = list(label = "Arbetslösa", klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Arbetslösa efter gymnasiet",
                     metrik = "arblos", metrik_label = "Andel arbetslösa",
-                    kalla = "SCB/RAKS")
+                    kalla = "SCB/RAKS",
+                    beskrivning = paste(
+                      "Arbetslös är den som har sin största inkomst från",
+                      "arbetslöshetsersättningar."))
     )
   )
 )
@@ -174,13 +225,35 @@ mod_gymnasiet_server <- function(id) {
 
     output$indikator_ui <- renderUI({
       omr <- gymnasiet_struktur[[ req(input$omrade) ]]
-      ch  <- .choices_fran_lista(omr$indikatorer)
-      div(
-        class = "rd-indikator-knappar",
-        shinyWidgets::radioGroupButtons(
-          inputId = ns("indikator"), label = "Indikator",
-          choices = ch, selected = unname(ch)[1], individual = TRUE
-        )
+      ch   <- .choices_fran_lista(omr$indikatorer)
+      # value -> beskrivning, bara för indikatorer som har en beskrivning satt.
+      # OBS: radioGroupButtons() bygger sina <button>-taggar lat (via
+      # htmltools::tagFunction) först vid rendering i webbläsaren, så vi kan
+      # inte gå igenom R-taggträdet och sätta title= direkt här (de finns
+      # inte som R-objekt än). I stället skickar vi med beskrivningarna som
+      # JSON i ett data-attribut (INTE som text-innehåll i <script> – det
+      # HTML-kodas av htmltools och webbläsaren avkodar det inte igen inuti
+      # en <script>-tagg, så JSON.parse() skulle fallera tyst). Attribut
+      # HTML-avkodas alltid korrekt. En liten JS-snutt (www/tooltips.js)
+      # läser attributet och sätter title på rätt knapp i den färdiga DOM:en.
+      besk <- omr$indikatorer |>
+        purrr::map("beskrivning") |>
+        purrr::compact()
+
+      knappar <- shinyWidgets::radioGroupButtons(
+        inputId = ns("indikator"), label = "Indikator",
+        choices = ch, selected = unname(ch)[1], individual = TRUE
+      )
+
+      tagList(
+        div(class = "rd-indikator-knappar", knappar),
+        if (length(besk) > 0)
+          tags$script(
+            type = "application/json",
+            class = "rd-tooltip-data",
+            `data-input-id`  = ns("indikator"),
+            `data-tooltips`  = as.character(jsonlite::toJSON(besk, auto_unbox = TRUE))
+          )
       )
     })
 
@@ -551,13 +624,16 @@ mod_gymnasiet_server <- function(id) {
     })
 
     # Filtrering som ska synas i varje diagrams underrubrik. Driftsform tas bara
-    # med när man filtrerat (inte "Alla"). med_ar lägger till valt år.
+    # med när man filtrerat (inte "Alla"). med_ar lägger till valt år – utan
+    # punkt-avgränsare, så det blir "Dalarna år 2025" i stället för
+    # "Dalarna · år 2025".
     filter_underrubrik <- function(med_ar = FALSE) {
       bitar <- geo_label()
       org <- input$organisationstyp
       if (!is.null(org) && org != "_alla_") bitar <- c(bitar, org)
-      if (med_ar) bitar <- c(bitar, as.character(req(input$ar)))
-      paste(bitar, collapse = " · ")
+      txt <- paste(bitar, collapse = " · ")
+      if (med_ar) txt <- paste0(txt, " år ", req(input$ar))
+      txt
     }
 
     output$vy <- renderUI({
@@ -571,16 +647,18 @@ mod_gymnasiet_server <- function(id) {
 
       if (valt_vy() == "etablering") {
         fluidRow(
-          column(7, hint,
-                 ggiraph::girafeOutput(ns("d_bar"), height = "560px")),
+          column(7,
+                 ggiraph::girafeOutput(ns("d_bar"), height = "560px"),
+                 hint),
           column(5,
                  div(class = "rd-subcard",
                      ggiraph::girafeOutput(ns("d_etablering_trend"), height = "380px")))
         )
       } else if (valt_vy() == "dashboard") {
         fluidRow(
-          column(7, hint,
+          column(7,
                  ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
+                 hint,
                  uiOutput(ns("kon_kontroll"))),
           column(5,
                  div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "250px")),
@@ -589,8 +667,9 @@ mod_gymnasiet_server <- function(id) {
       } else if (valt_vy() == "genomstromning") {
         # Stapel per program (vänster) + trendlinje Dalarna vs Riket (höger).
         fluidRow(
-          column(7, hint,
-                 ggiraph::girafeOutput(ns("d_bar"), height = "470px")),
+          column(7,
+                 ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
+                 hint),
           column(5,
                  div(class = "rd-subcard",
                      ggiraph::girafeOutput(ns("d_genomstromning_trend"), height = "300px")))
@@ -598,8 +677,9 @@ mod_gymnasiet_server <- function(id) {
       } else {
         # Årskurs och andel: stapel + en trend (ingen programtypsruta).
         fluidRow(
-          column(7, hint,
-                 ggiraph::girafeOutput(ns("d_bar"), height = "470px")),
+          column(7,
+                 ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
+                 hint),
           column(5,
                  div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "300px")))
         )
@@ -735,9 +815,9 @@ mod_gymnasiet_server <- function(id) {
       prog <- program_vald()
       rub  <- if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
       else paste0(ind$amne, " – ", prog)
-      # Underrubrik: filter + det senaste valda året (trenddiagrammet visar
-      # alla år men filtret gäller driftsform och geografi).
-      sub  <- paste0(filter_underrubrik(), " · t.o.m. ", req(input$ar))
+      # Underrubrik: bara filtret (driftsform + geografi). Trenddiagrammet
+      # visar alla år i tidsserien, så inget enskilt år ska anges här.
+      sub  <- filter_underrubrik()
 
       if (valt_vy() == "arskurs") {
         skapa_diagram_trend_arskurs(df, prog, rubrik = rub, underrubrik = sub, kalla = ind$kalla)
@@ -759,7 +839,7 @@ mod_gymnasiet_server <- function(id) {
       validate(need(nrow(df) > 0, "Inga data."))
       skapa_diagram_programtyp(df, ind$metrik, ind$metrik_label, program_vald(),
                                rubrik = paste0(ind$amne, " – andel efter programtyp"),
-                               underrubrik = paste0(filter_underrubrik(), " · t.o.m. ", req(input$ar)),
+                               underrubrik = filter_underrubrik(),
                                kalla = ind$kalla)
     })
 

@@ -1,12 +1,19 @@
-source('global.R')
-
 shinyUI(
   fluidPage(
     shinyjs::useShinyjs(),
     tags$head(
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),
       tags$link(rel = 'stylesheet', type = 'text/css', href = 'regiondalarna_ruf.css'),
-      tags$link(rel = 'stylesheet', type = 'text/css', href = 'app.css')
+      tags$link(rel = 'stylesheet', type = 'text/css', href = 'app.css'),
+      # Hover-tooltips på knappar (t.ex. indikatorknapparna) via tippy.js,
+      # se www/tooltips.js. Tippy + Popper laddas lokalt (självhostat, ingen
+      # extern CDN). OBS: "tippy-bundle" bundlar INTE Popper trots namnet –
+      # Popper måste laddas som en egen fil FÖRE tippy-bundle, annars blir
+      # window.Popper odefinierad och tippy kraschar internt vid start.
+      tags$link(rel = 'stylesheet', type = 'text/css', href = 'tippy.css'),
+      tags$script(src = 'popper.min.js'),
+      tags$script(src = 'tippy-bundle.umd.min.js'),
+      tags$script(src = 'tooltips.js')
     ),
 
     # ---- Header (full bredd via app.css) ---------------------------------
