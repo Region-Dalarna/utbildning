@@ -4,3 +4,4 @@ library(DBI)
 library(RPostgres)
 library(sf)
 # ... lägg till fler paket vid behov
+library(jsonlite)
