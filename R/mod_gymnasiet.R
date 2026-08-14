@@ -524,10 +524,26 @@ mod_gymnasiet_server <- function(id) {
     data_bas <- reactive({
       d  <- aktuell_data()
       gv <- req(input$geo_val)
-      if (gv != "_alla_") {
+
+      if ("geo_niva" %in% names(d)) {
+        # Datan har egna färdigviktade läns-/kommunrader (elever). Använd
+        # länsraden direkt för "Hela Dalarna" i stället för att vikta ihop
+        # kommunraderna själva – ger Skolverkets egna, redan korrekt
+        # viktade tal (samma mönster som genomströmning/etablering).
+        if (gv == "_alla_") {
+          d <- dplyr::filter(d, geo_niva == "lan")
+        } else if (input$geo_niva == "kommun") {
+          d <- dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+        } else {
+          # Samverkansområde: ingen färdig aggregatrad finns på den nivån,
+          # så där vaktar vi ihop kommunraderna som tillhör området.
+          d <- dplyr::filter(d, geo_niva == "kommun", samverkansomrade == gv)
+        }
+      } else if (gv != "_alla_") {
         d <- if (input$geo_niva == "kommun")
           dplyr::filter(d, kommkod == gv) else dplyr::filter(d, samverkansomrade == gv)
       }
+
       org <- input$organisationstyp
       if (!is.null(org) && org != "_alla_" && "organisationstyp" %in% names(d))
         d <- dplyr::filter(d, organisationstyp == org)

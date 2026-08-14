@@ -76,9 +76,13 @@ rensa_elevdata <- function(rad) {
     "Antal elever skolår 3"        = "elever_ak3"
   )
 
-  # Steg 1: Rensa och filtrera rådata till Dalarnas kommunrader.
+  # Steg 1: Rensa och filtrera rådata till Dalarnas kommunrader + länsraden.
   # "Samtliga" är en förberäknad totalsumma och tas bort för att undvika
   # dubbelräkning när vi summerar Kommunal + Enskild + eventuella andra.
+  # OBS: kommkod == "20" (Dalarnas län) behålls medvetet – Skolverket har
+  # redan en färdigt (och korrekt) viktad länsrad i datasetet, så appen
+  # slipper vikta ihop kommunraderna själv för "Hela Dalarna" (se geo_niva
+  # nedan och hur den används i data_bas() i mod_gymnasiet.R).
   rad_fil <- rad |>
     dplyr::rename(program = gymnasieprogram, kommkod = regionkod,
                   kommun = region, organisationstyp = huvudman) |>
@@ -88,8 +92,7 @@ rensa_elevdata <- function(rad) {
       varde   = as.numeric(varde)
     ) |>
     dplyr::filter(
-      nchar(kommkod) == 4,
-      substr(kommkod, 1, 2) == "20",
+      (kommkod == "20") | (nchar(kommkod) == 4 & substr(kommkod, 1, 2) == "20"),
       organisationstyp != "Samtliga"
     )
 
@@ -114,9 +117,12 @@ rensa_elevdata <- function(rad) {
     dplyr::group_by(ar, kommkod, kommun, program, organisationstyp, variabel) |>
     dplyr::summarise(varde = sum(varde, na.rm = TRUE), .groups = "drop")
 
-  # Andelar viktas med antal elever per driftsform.
+  # Andelar viktas med antal elever per driftsform. Rader med okänd andel
+  # (varde = NA, t.ex. Skolverkets cellsuppression för få elever) filtreras
+  # bort INNAN viktsumman räknas – annars bidrar de sina elever till
+  # nämnaren men noll till täljaren, vilket drar ner andelen konstlat.
   andel_df <- rad_fil |>
-    dplyr::filter(variabel %in% andel_vars) |>
+    dplyr::filter(variabel %in% andel_vars, !is.na(varde)) |>
     dplyr::left_join(
       dplyr::select(antal_df, ar, kommkod, program, organisationstyp, antal = varde),
       by = c("ar", "kommkod", "program", "organisationstyp")) |>
@@ -138,6 +144,7 @@ rensa_elevdata <- function(rad) {
 
   df |>
     dplyr::mutate(
+      geo_niva = dplyr::case_when(kommkod == "20" ~ "lan", TRUE ~ "kommun"),
       prog_niva = dplyr::case_when(
         program == "Nationella program"                                  ~ "total",
         program %in% c("Högskoleförberedande program", "Yrkesprogram")  ~ "programtyp",
