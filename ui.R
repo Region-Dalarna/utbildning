@@ -39,17 +39,19 @@ shinyUI(
         tabPanel('Yrkeshögskola', mod_yh_ui('yh')),
         tabPanel('Komvux',        mod_komvux_ui('komvux')),
         tabPanel('Högskola',      mod_skolform_placeholder_ui('hogskola', 'Högskola')),
+        tabPanel('Folkhögskola',  mod_folkhogskola_ui('folkhogskola')),
 
         tabPanel(
           'Om rapporten',
           div(class = 'rd-card',
               h2('Om rapporten'),
               p('Den här applikationen visar utbildningsstatistik för Dalarna. ',
-                'I nuvarande version är gymnasiet, yrkeshögskola (YH) och komvux ',
-                '(inkl. SFI) inlagda; högskola tillkommer efter hand.'),
+                'I nuvarande version är gymnasiet, yrkeshögskola (YH), komvux ',
+                '(inkl. SFI) och folkhögskola inlagda; högskola och grundskola ',
+                'tillkommer efter hand.'),
               div(class = 'rd-info',
                   tags$strong('Källa: '),
-                  'Gymnasieantagningen (Dalarnas kommunförbund), SCB (Yrkeshögskolan, Komvux/SFI).')
+                  'Gymnasieantagningen (Dalarnas kommunförbund), SCB (Yrkeshögskolan, Komvux/SFI, Folkhögskolan).')
           )
         )
       )
