@@ -17,13 +17,6 @@ gymnasiet_struktur <- list(
   antagning = list(
     label = "Antagning",
     indikatorer = list(
-      platser_program = list(label = "Platser", klar = TRUE, kon = FALSE,
-                             amne = "Gymnasieplatser",
-                             metrik = "platser", metrik_label = "Antal platser",
-                             kalla = .KALLA_ANTAGNING,
-                             beskrivning = paste(
-                               "Det antal platser som utbildningsanordnarna har angivit",
-                               "när antagningsprocessen startar i januari.")),
       antagna_program = list(label = "Antagna", klar = TRUE, kon = TRUE,
                              amne = "Antagna gymnasieelever",
                              metrik = "antagna", metrik_kv = "antagna_kv", metrik_man = "antagna_man",
@@ -39,6 +32,13 @@ gymnasiet_struktur <- list(
                              beskrivning = paste(
                                "Antal förstahandssökande. Precis som Antagna är detta",
                                "septembersiffror.")),
+      platser_program = list(label = "Platser", klar = TRUE, kon = FALSE,
+                             amne = "Gymnasieplatser",
+                             metrik = "platser", metrik_label = "Antal platser",
+                             kalla = .KALLA_ANTAGNING,
+                             beskrivning = paste(
+                               "Det antal platser som utbildningsanordnarna har angivit",
+                               "när antagningsprocessen startar i januari.")),
       outnyttjade     = list(label = "Outnyttjade platser", klar = TRUE, kon = FALSE,
                              amne = "Outnyttjade gymnasieplatser",
                              metrik = "lediga_platser", metrik_label = "Outnyttjade platser",
