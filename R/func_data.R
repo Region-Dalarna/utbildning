@@ -77,12 +77,14 @@ rensa_elevdata <- function(rad) {
   )
 
   # Steg 1: Rensa och filtrera rådata till Dalarnas kommunrader + länsraden.
-  # "Samtliga" är en förberäknad totalsumma och tas bort för att undvika
-  # dubbelräkning när vi summerar Kommunal + Enskild + eventuella andra.
   # OBS: kommkod == "20" (Dalarnas län) behålls medvetet – Skolverket har
   # redan en färdigt (och korrekt) viktad länsrad i datasetet, så appen
   # slipper vikta ihop kommunraderna själv för "Hela Dalarna" (se geo_niva
   # nedan och hur den används i data_bas() i mod_gymnasiet.R).
+  # "Samtliga" behålls också (döps om till "Alla" nedan) – det är
+  # Skolverkets egen färdiga totalrad för Kommunal+Enskild, så appen
+  # slipper summera ihop driftsformerna själv (samma mönster som redan
+  # används i rensa_genomstromning()).
   rad_fil <- rad |>
     dplyr::rename(program = gymnasieprogram, kommkod = regionkod,
                   kommun = region, organisationstyp = huvudman) |>
@@ -92,8 +94,7 @@ rensa_elevdata <- function(rad) {
       varde   = as.numeric(varde)
     ) |>
     dplyr::filter(
-      (kommkod == "20") | (nchar(kommkod) == 4 & substr(kommkod, 1, 2) == "20"),
-      organisationstyp != "Samtliga"
+      (kommkod == "20") | (nchar(kommkod) == 4 & substr(kommkod, 1, 2) == "20")
     )
 
   # Steg 2: Summera per (ar, kommkod, program, organisationstyp, variabel).
@@ -144,6 +145,10 @@ rensa_elevdata <- function(rad) {
 
   df |>
     dplyr::mutate(
+      organisationstyp = dplyr::case_when(
+        organisationstyp == "Samtliga" ~ "Alla",
+        TRUE                           ~ organisationstyp
+      ),
       geo_niva = dplyr::case_when(kommkod == "20" ~ "lan", TRUE ~ "kommun"),
       prog_niva = dplyr::case_when(
         program == "Nationella program"                                  ~ "total",
@@ -182,6 +187,31 @@ elever_endast_program <- function(df) {
   if ("prog_niva" %in% names(df))
     dplyr::filter(df, prog_niva %in% c("program", "introduktion_sub"))
   else df
+}
+
+# ============================================================
+#  Elevantal som viktningsunderlag för Genomströmning vid
+#  samverkansområden. gymnasiet_genomstromning saknar en egen
+#  antal-kolumn (bara färdigberäknad "andel"), så vi lånar
+#  elevantal från gymnasiet_elever för att kunna vikta ihop flera
+#  kommuner korrekt i stället för ett ovägt medelvärde.
+#
+#  Elevtabellen har en egen "Alla"-rad (Skolverkets "Samtliga",
+#  omdöpt i rensa_elevdata()) för Kommunal+Enskild kombinerat, så
+#  ingen egen summering behövs här.
+#
+#  OBS: programnamnen i genomströmnings- och elevtabellerna kommer
+#  från olika Skolverket-uttag och matchas här på exakt strängvärde
+#  (efter trimws()). Om ett program inte hittar en matchande vikt
+#  faller viktningen tillbaka till ovägt medel för just det
+#  programmet – se .viktat_medel_andel() i func_diagram.R. Värt att
+#  stämma av mot källdata efter driftsättning.
+# ============================================================
+hamta_elevantal_vikt <- function(force = FALSE) {
+  hamta_gymnasie_elever(force = force) |>
+    dplyr::filter(geo_niva == "kommun") |>
+    dplyr::mutate(program = trimws(program)) |>
+    dplyr::select(ar, kommkod, program, organisationstyp, vikt = antal_elever)
 }
 
 # ============================================================

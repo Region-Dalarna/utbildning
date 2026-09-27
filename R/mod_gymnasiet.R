@@ -375,9 +375,7 @@ mod_gymnasiet_server <- function(id) {
       }
 
       # Driftsformsfilter
-      org <- input$organisationstyp
-      if (!is.null(org) && org != "_alla_" && "organisationstyp" %in% names(d))
-        d <- dplyr::filter(d, organisationstyp == org)
+      d <- filtrera_driftsform(d, input$organisationstyp)
 
       # Programfilter
       pf <- input$program_filter
@@ -521,6 +519,24 @@ mod_gymnasiet_server <- function(id) {
       else gv
     })
 
+    # Driftsformsfilter, delad logik för alla statistikområden. Om en
+    # specifik driftsform är vald filtreras till den. Annars ("Alla"): om
+    # datan har en egen färdig totalrad (organisationstyp == "Alla" – t.ex.
+    # Skolverkets "Samtliga") används DEN direkt i stället för att appen
+    # själv summerar/väger ihop de enskilda driftsformerna. Saknar datan en
+    # sådan rad (t.ex. antagningsdata från Dalarnas kommunförbund) lämnas
+    # den orörd, så driftsformerna summeras ihop nedströms som tidigare.
+    filtrera_driftsform <- function(d, org) {
+      if (!"organisationstyp" %in% names(d)) return(d)
+      if (!is.null(org) && org != "_alla_") {
+        dplyr::filter(d, organisationstyp == org)
+      } else if ("Alla" %in% d$organisationstyp) {
+        dplyr::filter(d, organisationstyp == "Alla")
+      } else {
+        d
+      }
+    }
+
     data_bas <- reactive({
       d  <- aktuell_data()
       gv <- req(input$geo_val)
@@ -544,9 +560,7 @@ mod_gymnasiet_server <- function(id) {
           dplyr::filter(d, kommkod == gv) else dplyr::filter(d, samverkansomrade == gv)
       }
 
-      org <- input$organisationstyp
-      if (!is.null(org) && org != "_alla_" && "organisationstyp" %in% names(d))
-        d <- dplyr::filter(d, organisationstyp == org)
+      d <- filtrera_driftsform(d, input$organisationstyp)
       d
     })
     data_ar <- reactive({
@@ -581,14 +595,29 @@ mod_gymnasiet_server <- function(id) {
       org_filter <- if (!is.null(org) && org != "_alla_") org else "Alla"
 
       if (is.null(gv) || gv == "_alla_") {
-        # Hela Dalarna: Skolverkets länssummering (geo_niva == "lan")
+        # Hela Dalarna: Skolverkets länssummering (geo_niva == "lan").
+        # Redan en färdig rad per program – ingen viktning behövs.
         d |> dplyr::filter(geo_niva == "lan", organisationstyp == org_filter)
       } else if (input$geo_niva == "kommun") {
+        # Enskild kommun: också redan en färdig rad per program.
         d |> dplyr::filter(geo_niva == "kommun", kommkod == gv,
                            organisationstyp == org_filter)
       } else {
+        # Samverkansområde: flera kommuners rader ska slås ihop. Skolverket
+        # har ingen färdig aggregatrad på den här nivån (samverkansområden
+        # är en lokal Region Dalarna-indelning), så vi joinar in elevantal
+        # från elevtabellen som viktningsunderlag (se
+        # hamta_elevantal_vikt() i func_data.R) i stället för ett ovägt
+        # medel. Om en programrad saknar matchande vikt faller
+        # .viktat_medel_andel() (func_diagram.R) tillbaka till ovägt medel
+        # för just det programmet.
         d |> dplyr::filter(geo_niva == "kommun", samverkansomrade == gv,
-                           organisationstyp == org_filter)
+                           organisationstyp == org_filter) |>
+          dplyr::mutate(program = trimws(program)) |>
+          dplyr::left_join(
+            hamta_elevantal_vikt(),
+            by = c("kommkod", "program", "ar", "organisationstyp")
+          )
       }
     })
 
@@ -758,6 +787,10 @@ mod_gymnasiet_server <- function(id) {
         validate(need(nrow(df_gs) > 0, "Inga data för valt urval."))
         lasar_txt <- if (nrow(df_gs) > 0) df_gs$lasar[1] else as.character(input$ar)
         sub_gs <- paste0(filter_underrubrik(), " · startläsår ", lasar_txt)
+        # "vikt" finns bara när flera kommuner vägs ihop för ett
+        # samverkansområde (se genomstromning_dalarna()) – annars används
+        # Skolverkets egen färdiga siffra rakt av, ingen viktning i appen.
+        if ("vikt" %in% names(df_gs)) sub_gs <- paste0(sub_gs, " · viktat efter antal elever")
         skapa_diagram_genomstromning_bar(df_gs, input$ar,
                                          rubrik = ind$amne,
                                          underrubrik = sub_gs, kalla = ind$kalla)
@@ -768,9 +801,15 @@ mod_gymnasiet_server <- function(id) {
           skapa_diagram_arskurs(df, input$ar, rubrik = ind$amne,
                                 underrubrik = sub, kalla = ind$kalla)
         } else if (valt_vy() == "andel") {
+          # Viktning sker bara i praktiken när flera kommuner slås ihop
+          # (samverkansområde) - Hela Dalarna/enskild kommun är numera en
+          # färdig rad (se data_bas()/"Alla"-raden), ingen viktning då.
+          sub_andel <- if (dplyr::n_distinct(df$kommkod) > 1)
+            paste0(sub, " · viktat efter antal elever") else sub
           skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
                                   rubrik = paste0(ind$amne, " efter program"),
-                                  underrubrik = sub, kalla = ind$kalla)
+                                  underrubrik = sub_andel,
+                                  kalla = ind$kalla)
         } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
           skapa_diagram_bar_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, input$ar,
                                 rubrik = paste0(ind$amne, " efter program"),
@@ -819,6 +858,9 @@ mod_gymnasiet_server <- function(id) {
         dplyr::filter(df_dal, program == "Nationella program")
       else
         dplyr::filter(df_dal, program == prog)
+      # Se motsvarande kommentar i d_bar ovan: "vikt" finns bara vid
+      # samverkansområde.
+      if ("vikt" %in% names(df_prog)) sub <- paste0(sub, " · viktat efter antal elever")
       skapa_diagram_genomstromning_trend(df_prog, df_rik,
                                          rubrik = rub, underrubrik = sub,
                                          kalla = ind$kalla)
@@ -838,8 +880,12 @@ mod_gymnasiet_server <- function(id) {
       if (valt_vy() == "arskurs") {
         skapa_diagram_trend_arskurs(df, prog, rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       } else if (valt_vy() == "andel") {
+        # Se motsvarande kommentar vid d_bar ovan.
+        sub_andel <- if (dplyr::n_distinct(df$kommkod) > 1)
+          paste0(sub, " · viktat efter antal elever") else sub
         skapa_diagram_trend_andel(df, ind$metrik, ind$vikt, ind$metrik_label, prog,
-                                  rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+                                  rubrik = rub, underrubrik = sub_andel,
+                                  kalla = ind$kalla)
       } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
         skapa_diagram_trend_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, prog,
                                 rubrik = rub, underrubrik = sub, kalla = ind$kalla)
