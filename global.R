@@ -24,7 +24,11 @@ source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_sh
 # Hjälp- och modulfiler i R/ laddas AUTOMATISKT av Shiny (>= 1.5.0), i
 # bokstavsordning och efter denna fil. Inga source()-rader behövs här.
 #   R/def_geografi.R            kommuner + Gysam-områden
-#   R/func_data.R               databas-/demodataläsning   (beror på def_geografi)
+#   R/func_data.R               databas-/demodataläsning, gymnasiet   (beror på def_geografi)
+#   R/func_data_komvux.R        databasläsning, Komvux/SFI
+#   R/func_data_yh.R            databasläsning, Yrkeshögskola (YH)
 #   R/func_diagram.R            diagramhjälpare (ggiraph)
 #   R/mod_gymnasiet.R           modul: skolform Gymnasiet
-#   R/mod_skolform_placeholder.R platshållarmodul för övriga skolformer
+#   R/mod_komvux.R              modul: skolform Komvux (inkl. SFI)
+#   R/mod_yh.R                  modul: skolform Yrkeshögskola (YH)
+#   R/mod_skolform_placeholder.R platshållarmodul för Högskola/Folkhögskola/Grundskola
