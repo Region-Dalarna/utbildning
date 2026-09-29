@@ -41,17 +41,17 @@ folkhogskola_struktur <- list(
                        amne = "Antal med grundläggande behörighet",
                        metrik = "grundlbeh", metrik_label = "Antal med grundläggande behörighet",
                        kalla = .KALLA_FOLKHOGSKOLA,
-                       beskrivning = "Antal deltagare som fått grundläggande behörighet till högskolan."),
-      eftergym_klar = list(label = "Eftergymnasial utbildning klar", klar = TRUE, vy = "dashboard", kon = FALSE,
-                           amne = "Antal som slutfört eftergymnasial utbildning",
-                           metrik = "eftergym_klar", metrik_label = "Antal som slutfört",
+                       beskrivning = "Antal deltagare som uppnått grundläggande behörighet för högskolestudier."),
+      eftergym_klar = list(label = "Intyg eftergymnasial utbildning", klar = TRUE, vy = "dashboard", kon = FALSE,
+                           amne = "Antal med intyg om eftergymnasial utbildning",
+                           metrik = "eftergym_klar", metrik_label = "Antal med intyg",
                            kalla = .KALLA_FOLKHOGSKOLA,
-                           beskrivning = "Antal deltagare som slutfört en eftergymnasial utbildning."),
-      yrkesbeh = list(label = "Yrkesbehörighet", klar = TRUE, vy = "dashboard", kon = FALSE,
-                      amne = "Antal med yrkesbehörighet",
-                      metrik = "yrkesbeh", metrik_label = "Antal med yrkesbehörighet",
+                           beskrivning = "Antal deltagare som fått intyg om genomförd eftergymnasial utbildning."),
+      yrkesbeh = list(label = "Behörighet till YH", klar = TRUE, vy = "dashboard", kon = FALSE,
+                      amne = "Antal med behörighet till yrkeshögskolan",
+                      metrik = "yrkesbeh", metrik_label = "Antal med behörighet till YH",
                       kalla = .KALLA_FOLKHOGSKOLA,
-                      beskrivning = "Antal deltagare som fått yrkesbehörighet.")
+                      beskrivning = "Antal deltagare som uppnått behörighet till yrkeshögskolan.")
     )
   )
 )
