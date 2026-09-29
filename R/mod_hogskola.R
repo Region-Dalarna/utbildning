@@ -98,7 +98,7 @@ mod_hogskola_ui <- function(id) {
         tags$hr(),
 
         shinyWidgets::pickerInput(
-          inputId = ns("geo_val"), label = "Område",
+          inputId = ns("geo_val"), label = "Område (hemkommun)",
           choices = c("Hela Dalarna" = "_alla_", geo_val_kommun),
           selected = "_alla_",
           options = shinyWidgets::pickerOptions(liveSearch = TRUE)
