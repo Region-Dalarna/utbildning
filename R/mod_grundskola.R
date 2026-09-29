@@ -30,8 +30,9 @@ grundskola_struktur <- list(
                         vikt = "meritvarde_underlag", enhet = "",
                         metrik_label = "Genomsnittligt meritvärde", kalla = .KALLA_GRUNDSKOLA,
                         beskrivning = paste(
-                          "Summan av betygsvärdena i elevens bästa ämnen, i genomsnitt bland",
-                          "elever som har ett meritvärde.")),
+                          "Summan av elevens 17 bästa betyg i slutbetyget, inklusive moderna språk",
+                          "som språkval (A = 20, B = 17,5, C = 15, D = 12,5, E = 10). Högsta",
+                          "möjliga meritvärde är 340. Genomsnitt bland elever med meritvärde.")),
       en = list(label = "Engelska", klar = TRUE, vy = "andel", kon = FALSE,
                amne = "Andel godkänt i Engelska", metrik = "andel_en_godkant", vikt = "en_underlag",
                metrik_label = "Andel godkänt (%)", kalla = .KALLA_GRUNDSKOLA,
