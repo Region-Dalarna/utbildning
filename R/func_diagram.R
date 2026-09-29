@@ -369,9 +369,11 @@ skapa_diagram_trend_arskurs <- function(df, program_sel = NULL,
 
 # ---- Viktad andel (%) per program – liggande stapel -----------------------
 # andel_kol är ett procenttal (0-100), vikt_kol är antal elever. Andelen
-# aggregeras som viktat medel: sum(andel * vikt) / sum(vikt).
+# aggregeras som viktat medel: sum(andel * vikt) / sum(vikt). Fungerar för
+# alla viktade medelvärden (t.ex. meritvärde) - enhet styr suffixet.
 skapa_diagram_bar_andel <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
-                                    rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                    rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                    enhet = " %") {
   d <- df |>
     dplyr::group_by(program) |>
     dplyr::summarise(
@@ -384,13 +386,13 @@ skapa_diagram_bar_andel <- function(df, andel_kol, vikt_kol, metrik_label, ar = 
     dplyr::mutate(
       program = forcats::fct_reorder(program, andel),
       tooltip = paste0("<b>", program, "</b><br/>", .metrik_ar(metrik_label, ar), ": ",
-                       scales::number(andel, accuracy = 0.1), " %"),
+                       scales::number(andel, accuracy = 0.1), enhet),
       data_id = as.character(program))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = program)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id), fill = RD_PRIMARY, width = 0.74) +
-    ggplot2::scale_x_continuous(labels = function(x) paste0(x, " %"),
+    ggplot2::scale_x_continuous(labels = function(x) paste0(x, enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
@@ -401,7 +403,8 @@ skapa_diagram_bar_andel <- function(df, andel_kol, vikt_kol, metrik_label, ar = 
 
 # ---- Viktad andel (%) över tid – linje ------------------------------------
 skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, program_sel = NULL,
-                                      rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                      rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                      enhet = " %") {
   if (!is.null(program_sel)) df <- dplyr::filter(df, program == program_sel)
 
   d <- df |>
@@ -414,14 +417,14 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
       .groups = "drop") |>
     dplyr::filter(!is.na(andel)) |>
     dplyr::mutate(tooltip = paste0(metrik_label, " ", ar, ": ",
-                                   scales::number(andel, accuracy = 0.1), " %"))
+                                   scales::number(andel, accuracy = 0.1), enhet))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel)) +
     ggplot2::geom_line(color = RD_PRIMARY, linewidth = 0.9) +
     ggiraph::geom_point_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
-    ggplot2::scale_y_continuous(labels = function(x) paste0(x, " %")) +
+    ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
