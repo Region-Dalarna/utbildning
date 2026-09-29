@@ -19,18 +19,19 @@
 #    (förstasiffran i sun2020inr resp. huvomgrp).
 # ============================================================
 
-# SUN 2020, bredaste inriktningsnivå (förstasiffran i inriktningskoden).
+# SUN 2020, bredaste inriktningsnivå (förstasiffran i inriktningskoden),
+# benämningar enligt SCB:s värdemängd för SUN2020Inr_1.
 .sun_bredast <- c(
   "0" = "Allmän utbildning",
   "1" = "Pedagogik och lärarutbildning",
   "2" = "Humaniora och konst",
   "3" = "Samhällsvetenskap, juridik, handel, administration",
-  "4" = "Naturvetenskap, matematik och IKT",
+  "4" = "Naturvetenskap, matematik och informations- och kommunikationsteknik (IKT)",
   "5" = "Teknik och tillverkning",
   "6" = "Lant- och skogsbruk samt djursjukvård",
   "7" = "Hälso- och sjukvård samt social omsorg",
   "8" = "Tjänster",
-  "9" = "Okänd inriktning"
+  "9" = "Okänd"
 )
 
 # Examenstyp ur första bokstaven i tmgrp (G = generell, K = konstnärlig,
@@ -69,7 +70,7 @@ rensa_hogskola_examen <- function(rad) {
       ar         = as.integer(ar),
       kommkod    = as.character(kommkod),
       program    = dplyr::coalesce(unname(.sun_bredast[substr(sun2020inr, 1, 1)]),
-                                   "Okänd inriktning"),
+                                   "Okänd"),
       examenstyp = dplyr::coalesce(unname(.examenstyp[substr(tmgrp, 1, 1)]),
                                    "Övrig examen")
     ) |>

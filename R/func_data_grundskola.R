@@ -11,6 +11,11 @@
 #  samma mönster som gymnasiets viktade andelar. Meritvärde vägs på samma
 #  sätt med antal elever med meritvärde.
 #
+#  Meritvärde: appen använder meritvarde_m2_medel (MeritVarde_M2 = 17 bästa
+#  betyg inkl. moderna språk, max 340, enligt SCB:s definition).
+#  meritvarde_medel (MeritVarde) ligger på en lägre skala och används inte. Elever med meritvärde 0 (inga
+#  kunskapsrelaterade betyg) är redan bortfiltrerade i uttaget.
+#
 #  Rader där måttet saknas (NA) får underlag 0, annars räknas eleverna in
 #  i nämnaren men inte i täljaren och drar ner snittet.
 # ============================================================
@@ -48,8 +53,8 @@ rensa_grundskola_data <- function(rad) {
       andel_ma_godkant  = ma$andel,  ma_underlag      = ma$underlag,
       andel_sv_godkant  = sv$andel,  sv_underlag      = sv$underlag,
       andel_sva_godkant = sva$andel, sva_underlag     = sva$underlag,
-      meritvarde_underlag = dplyr::if_else(is.na(meritvarde_medel), 0,
-                                           as.numeric(dplyr::coalesce(antal_med_meritvarde, 0L)))
+      meritvarde_underlag = dplyr::if_else(is.na(meritvarde_m2_medel), 0,
+                                           as.numeric(dplyr::coalesce(antal_med_meritvarde_m2, 0L)))
     )
 }
 

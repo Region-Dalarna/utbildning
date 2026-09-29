@@ -26,7 +26,7 @@ grundskola_struktur <- list(
                           "program krävs lägst betyget godkänd i ämnena svenska/svenska som",
                           "andraspråk, engelska och matematik.")),
       meritvarde = list(label = "Meritvärde", klar = TRUE, vy = "andel", kon = FALSE,
-                        amne = "Genomsnittligt meritvärde", metrik = "meritvarde_medel",
+                        amne = "Genomsnittligt meritvärde", metrik = "meritvarde_m2_medel",
                         vikt = "meritvarde_underlag", enhet = "",
                         metrik_label = "Genomsnittligt meritvärde", kalla = .KALLA_GRUNDSKOLA,
                         beskrivning = paste(

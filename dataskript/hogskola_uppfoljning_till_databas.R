@@ -36,12 +36,12 @@ sun_bredast <- c(
   "1" = "Pedagogik och lärarutbildning",
   "2" = "Humaniora och konst",
   "3" = "Samhällsvetenskap, juridik, handel, administration",
-  "4" = "Naturvetenskap, matematik och IKT",
+  "4" = "Naturvetenskap, matematik och informations- och kommunikationsteknik (IKT)",
   "5" = "Teknik och tillverkning",
   "6" = "Lant- och skogsbruk samt djursjukvård",
   "7" = "Hälso- och sjukvård samt social omsorg",
   "8" = "Tjänster",
-  "9" = "Okänd inriktning"
+  "9" = "Okänd"
 )
 
 # ---- Läs och summera -------------------------------------------------------
@@ -57,7 +57,7 @@ hogskola_etablering <- ra |>
       is.na(huvomgrp),
       "Utan huvudområde (främst yrkesexamina)",
       dplyr::coalesce(unname(sun_bredast[substr(as.character(huvomgrp), 1, 1)]),
-                      "Okänd inriktning")),
+                      "Okänd")),
     dplyr::across(c(antal_ar, syss, stud, arblos, ovriga, antal, etabl), as.integer),
     forvink_etabl = as.numeric(forvink_etabl),
     # Inkomst saknas för en del etablerade - håll reda på hur många som har
