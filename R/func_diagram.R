@@ -433,6 +433,70 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
   .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
 }
 
+# ---- Viktad andel per område och kön – grupperade liggande staplar --------
+# En rad per område (Hela Dalarna + kommunerna) med en stapel per kön.
+# df har geo_niva "lan"/"kommun", kommkod, kommun och program = kön
+# ("Kvinna"/"Man"). Hela Dalarna ligger överst, kommunerna sorteras på
+# andelen för båda könen tillsammans. Klick på en rad ger kommkod (länet
+# = "20") i input$<id>_selected. vald_kommkod tonar ned övriga rader.
+skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
+                                           vald_kommkod = NULL,
+                                           rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                           enhet = " %") {
+  kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
+  d <- df |>
+    dplyr::filter(geo_niva %in% c("lan", "kommun"), program %in% names(kon_etikett)) |>
+    dplyr::mutate(omrade = dplyr::if_else(geo_niva == "lan", "Hela Dalarna", kommun),
+                  kon    = unname(kon_etikett[program])) |>
+    dplyr::group_by(kommkod, omrade, kon) |>
+    dplyr::summarise(
+      vikt  = sum(.data[[vikt_kol]], na.rm = TRUE),
+      andel = ifelse(vikt > 0,
+                     sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
+                     NA_real_),
+      .groups = "drop") |>
+    dplyr::filter(!is.na(andel))
+
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
+
+  # Sortering: kommunerna efter andel för båda könen (viktat), länet överst.
+  ordning <- d |>
+    dplyr::filter(omrade != "Hela Dalarna") |>
+    dplyr::group_by(omrade) |>
+    dplyr::summarise(tot = sum(andel * vikt) / sum(vikt), .groups = "drop") |>
+    dplyr::arrange(tot) |>
+    dplyr::pull(omrade)
+
+  vald_rad <- if (is.null(vald_kommkod) || vald_kommkod %in% c("_alla_", "20")) "20" else vald_kommkod
+
+  d <- d |>
+    dplyr::mutate(
+      omrade  = factor(omrade, levels = c(ordning, "Hela Dalarna")),
+      kon     = factor(kon, levels = c("Kvinnor", "Män")),
+      alfa    = dplyr::if_else(kommkod == vald_rad, 1, 0.45),
+      tooltip = paste0("<b>", omrade, "</b><br/>", kon, " \u00b7 ",
+                       .metrik_ar(metrik_label, ar), ": ",
+                       scales::number(andel, accuracy = 0.1), enhet),
+      data_id = kommkod)
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = omrade, fill = kon)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = data_id, alpha = alfa),
+      # reverse = TRUE: Kvinnor överst i varje par, samma ordning som legenden
+      position = ggplot2::position_dodge(width = 0.8, reverse = TRUE), width = 0.75) +
+    ggplot2::scale_alpha_identity() +
+    ggplot2::scale_fill_manual(values = KON_FARGER, name = NULL,
+                               breaks = c("Kvinnor", "Män")) +
+    ggplot2::scale_x_continuous(labels = function(x) paste0(x, enhet),
+                                expand = ggplot2::expansion(mult = c(0, 0.04))) +
+    ggplot2::labs(x = metrik_label, y = NULL,
+                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top")
+
+  .girafe_std(g, width_svg = 7, height_svg = 9, selection = TRUE)
+}
+
 # ============================================================
 #  Genomströmning: trend med Dalarna + Riket som jämförelse
 # ============================================================

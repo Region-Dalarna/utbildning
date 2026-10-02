@@ -34,13 +34,14 @@ shinyUI(
       style = 'padding: 8px 24px 24px;',
       tabsetPanel(
         id = 'skolform',
+        selected = 'Gymnasiet',
 
-        tabPanel('Gymnasiet',     mod_gymnasiet_ui('gym')),
-        tabPanel('Yrkeshögskola', mod_yh_ui('yh')),
-        tabPanel('Komvux',        mod_komvux_ui('komvux')),
-        tabPanel('Högskola',      mod_hogskola_ui('hogskola')),
         tabPanel('Grundskola',    mod_grundskola_ui('grundskola')),
+        tabPanel('Gymnasiet',     mod_gymnasiet_ui('gym')),
+        tabPanel('Komvux',        mod_komvux_ui('komvux')),
         tabPanel('Folkhögskola',  mod_folkhogskola_ui('folkhogskola')),
+        tabPanel('Yrkeshögskola', mod_yh_ui('yh')),
+        tabPanel('Högskola',      mod_hogskola_ui('hogskola')),
 
         tabPanel(
           'Om rapporten',

@@ -4,9 +4,11 @@
 #
 #  Samma förenklade mönster som mod_komvux.R (inget program-/
 #  inriktningsval, ingen samverkansområde/karta). "program" i
-#  diagramfunktionernas mening = kön (se func_data_grundskola.R), så
-#  stapel/trend visar Män vs Kvinnor snarare än en ämnesuppdelning -
-#  grundskoladatan saknar en naturlig sådan dimension.
+#  diagramfunktionernas mening = kön (se func_data_grundskola.R).
+#
+#  Stapeldiagrammet visar alltid Hela Dalarna och alla kommuner, uppdelat
+#  på kön, för valt år. Valt område (filtret eller klick på en stapel)
+#  styr trenden och markeras i staplarna.
 #
 #  Alla indikatorer är viktade medelvärden (vy "andel"). Meritvärde har
 #  enhet "" i stället för " %" (se skapa_diagram_bar_andel()).
@@ -176,6 +178,21 @@ mod_grundskola_server <- function(id) {
       dplyr::filter(data_bas(), ar == as.integer(input$ar))
     })
 
+    # Alla kommuner + länet för valt år (stapeldiagrammet).
+    data_ar_alla <- reactive({
+      req(input$ar)
+      dplyr::filter(aktuell_data(), ar == as.integer(input$ar),
+                    geo_niva %in% c("lan", "kommun"))
+    })
+
+    # Klick på en stapel väljer området i filtret (länet = Hela Dalarna).
+    observeEvent(input$d_bar_selected, {
+      sel <- input$d_bar_selected
+      if (length(sel) != 1) return()
+      shinyWidgets::updatePickerInput(session, "geo_val",
+                                      selected = if (sel == "20") "_alla_" else sel)
+    })
+
     output$brodsmula <- renderText({
       omr <- grundskola_struktur[[req(input$omrade)]]$label
       paste0("Grundskola \u203a ", omr, " \u203a ", valt_indikator()$label)
@@ -184,21 +201,24 @@ mod_grundskola_server <- function(id) {
     output$vy <- renderUI({
       ind <- valt_indikator()
       if (!isTRUE(ind$klar)) return(div(class = "rd-info", "Den här vyn är inte inlagd än."))
+      hint <- tags$p(class = "rd-hint rd-hint--bar",
+                     "Klicka på en stapel för att se utvecklingen över tid för kommunen.")
       fluidRow(
-        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "420px")),
+        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "760px"), hint),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
       )
     })
 
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      df  <- data_ar()
+      df  <- data_ar_alla()
       validate(need(nrow(df) > 0, "Inga data för valt urval."))
-      sub <- filter_underrubrik(med_ar = TRUE)
-      skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
-                              rubrik = paste0(ind$amne, " efter kön"),
-                              underrubrik = sub, kalla = ind$kalla,
-                              enhet = if (is.null(ind$enhet)) " %" else ind$enhet)
+      skapa_diagram_andel_omrade_kon(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
+                                     vald_kommkod = input$geo_val,
+                                     rubrik = paste0(ind$amne, " efter kommun och kön"),
+                                     underrubrik = paste0("Skolans kommun \u00b7 år ", input$ar),
+                                     kalla = ind$kalla,
+                                     enhet = if (is.null(ind$enhet)) " %" else ind$enhet)
     })
 
     output$d_trend <- ggiraph::renderGirafe({
