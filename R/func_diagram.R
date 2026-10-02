@@ -439,15 +439,16 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
 # ("Kvinna"/"Man"). Hela Dalarna ligger överst, kommunerna sorteras på
 # andelen för båda könen tillsammans. Klick på en rad ger kommkod (länet
 # = "20") i input$<id>_selected. vald_kommkod tonar ned övriga rader.
+# kon_uppdelat = FALSE slår ihop könen till en stapel per område.
 skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
-                                           vald_kommkod = NULL,
+                                           vald_kommkod = NULL, kon_uppdelat = TRUE,
                                            rubrik = NULL, underrubrik = NULL, kalla = NULL,
                                            enhet = " %") {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
   d <- df |>
     dplyr::filter(geo_niva %in% c("lan", "kommun"), program %in% names(kon_etikett)) |>
     dplyr::mutate(omrade = dplyr::if_else(geo_niva == "lan", "Hela Dalarna", kommun),
-                  kon    = unname(kon_etikett[program])) |>
+                  kon    = if (kon_uppdelat) unname(kon_etikett[program]) else "Totalt") |>
     dplyr::group_by(kommkod, omrade, kon) |>
     dplyr::summarise(
       vikt  = sum(.data[[vikt_kol]], na.rm = TRUE),
@@ -472,9 +473,10 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
   d <- d |>
     dplyr::mutate(
       omrade  = factor(omrade, levels = c(ordning, "Hela Dalarna")),
-      kon     = factor(kon, levels = c("Kvinnor", "Män")),
+      kon     = factor(kon, levels = c("Kvinnor", "Män", "Totalt")),
       alfa    = dplyr::if_else(kommkod == vald_rad, 1, 0.45),
-      tooltip = paste0("<b>", omrade, "</b><br/>", kon, " \u00b7 ",
+      tooltip = paste0("<b>", omrade, "</b><br/>",
+                       if (kon_uppdelat) paste0(kon, " \u00b7 ") else "",
                        .metrik_ar(metrik_label, ar), ": ",
                        scales::number(andel, accuracy = 0.1), enhet),
       data_id = kommkod)
@@ -485,8 +487,9 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
       # reverse = TRUE: Kvinnor överst i varje par, samma ordning som legenden
       position = ggplot2::position_dodge(width = 0.8, reverse = TRUE), width = 0.75) +
     ggplot2::scale_alpha_identity() +
-    ggplot2::scale_fill_manual(values = KON_FARGER, name = NULL,
-                               breaks = c("Kvinnor", "Män")) +
+    ggplot2::scale_fill_manual(values = c(KON_FARGER, "Totalt" = RD_PRIMARY), name = NULL,
+                               breaks = c("Kvinnor", "Män"),
+                               guide = if (kon_uppdelat) "legend" else "none") +
     ggplot2::scale_x_continuous(labels = function(x) paste0(x, enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
@@ -495,6 +498,45 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
     ggplot2::theme(legend.position = "top")
 
   .girafe_std(g, width_svg = 7, height_svg = 9, selection = TRUE)
+}
+
+# ---- Viktad andel över tid per kön – två linjer ---------------------------
+# Som skapa_diagram_trend_andel(), men med en linje per kön (program =
+# "Kvinna"/"Man").
+skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
+                                          rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                          enhet = " %") {
+  kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
+  d <- df |>
+    dplyr::filter(program %in% names(kon_etikett)) |>
+    dplyr::mutate(kon = unname(kon_etikett[program])) |>
+    dplyr::group_by(ar, kon) |>
+    dplyr::summarise(
+      vikt  = sum(.data[[vikt_kol]], na.rm = TRUE),
+      andel = ifelse(vikt > 0,
+                     sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
+                     NA_real_),
+      .groups = "drop") |>
+    dplyr::filter(!is.na(andel)) |>
+    dplyr::mutate(tooltip = paste0(kon, " \u00b7 ", metrik_label, " ", ar, ": ",
+                                   scales::number(andel, accuracy = 0.1), enhet))
+
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel, color = kon, group = kon)) +
+    ggplot2::geom_line(linewidth = 0.9) +
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2) +
+    ggplot2::scale_color_manual(values = KON_FARGER, name = NULL) +
+    ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
+    ggplot2::labs(x = NULL, y = NULL,
+                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position    = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+
+  .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
 }
 
 # ============================================================

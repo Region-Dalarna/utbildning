@@ -185,6 +185,9 @@ mod_grundskola_server <- function(id) {
                     geo_niva %in% c("lan", "kommun"))
     })
 
+    # Könsuppdelat (förvalt) eller totalt - styr både staplar och trend.
+    kon_uppdelat <- reactive({ !identical(input$kon_lage, "total") })
+
     # Klick på en stapel väljer området i filtret (länet = Hela Dalarna).
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
@@ -204,7 +207,13 @@ mod_grundskola_server <- function(id) {
       hint <- tags$p(class = "rd-hint rd-hint--bar",
                      "Klicka på en stapel för att se utvecklingen över tid för kommunen.")
       fluidRow(
-        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "760px"), hint),
+        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "760px"), hint,
+               div(class = "rd-kon-kontroll",
+                   shinyWidgets::radioGroupButtons(
+                     inputId  = ns("kon_lage"), label = NULL,
+                     choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
+                     selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+                     size = "sm"))),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
       )
     })
@@ -215,7 +224,9 @@ mod_grundskola_server <- function(id) {
       validate(need(nrow(df) > 0, "Inga data för valt urval."))
       skapa_diagram_andel_omrade_kon(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
                                      vald_kommkod = input$geo_val,
-                                     rubrik = paste0(ind$amne, " efter kommun och kön"),
+                                     kon_uppdelat = kon_uppdelat(),
+                                     rubrik = paste0(ind$amne, " efter kommun",
+                                                     if (kon_uppdelat()) " och kön" else ""),
                                      underrubrik = paste0("Skolans kommun \u00b7 år ", input$ar),
                                      kalla = ind$kalla,
                                      enhet = if (is.null(ind$enhet)) " %" else ind$enhet)
@@ -227,9 +238,16 @@ mod_grundskola_server <- function(id) {
       validate(need(nrow(df) > 0, "Inga data."))
       rub <- paste0(ind$amne, " \u2013 utveckling över tid")
       sub <- filter_underrubrik()
-      skapa_diagram_trend_andel(df, ind$metrik, ind$vikt, ind$metrik_label, NULL,
-                                rubrik = rub, underrubrik = sub, kalla = ind$kalla,
-                                enhet = if (is.null(ind$enhet)) " %" else ind$enhet)
+      enh <- if (is.null(ind$enhet)) " %" else ind$enhet
+      if (kon_uppdelat()) {
+        skapa_diagram_trend_andel_kon(df, ind$metrik, ind$vikt, ind$metrik_label,
+                                      rubrik = rub, underrubrik = sub, kalla = ind$kalla,
+                                      enhet = enh)
+      } else {
+        skapa_diagram_trend_andel(df, ind$metrik, ind$vikt, ind$metrik_label, NULL,
+                                  rubrik = rub, underrubrik = sub, kalla = ind$kalla,
+                                  enhet = enh)
+      }
     })
 
     output$ladda_ner <- downloadHandler(
