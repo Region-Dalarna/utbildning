@@ -5,7 +5,8 @@
 #  Samma upplägg som Grundskola-modulen: stapeldiagrammet visar Hela
 #  Dalarna och alla kommuner för valt år, könsuppdelat eller totalt.
 #  Valt område (filtret eller klick på en stapel) styr trenden.
-#  Ålder och utländsk bakgrund är filter i sidopanelen.
+#  Under staplarna väljs könsuppdelat, totalt eller åldersgrupper (2-5 år).
+#  Född i Sverige/utomlands är ett filter i sidopanelen.
 # ============================================================
 
 .KALLA_FORSKOLA <- "SCB, Förskolan"
@@ -18,27 +19,23 @@ forskola_struktur <- list(
                              amne = "Andel barn inskrivna i förskolan", metrik = "andel_inskrivna",
                              vikt = "antal_barn", metrik_label = "Andel inskrivna (%)",
                              kalla = .KALLA_FORSKOLA,
-                             beskrivning = "Andel av alla barn i åldern som är inskrivna i förskolan."),
-      antal_inskrivna = list(label = "Antal inskrivna", klar = TRUE, vy = "andel", kon = FALSE,
-                             amne = "Antal barn inskrivna i förskolan", metrik = "antal_forskola",
-                             vikt = "antal_barn", summa = TRUE, enhet = "",
-                             metrik_label = "Antal inskrivna", kalla = .KALLA_FORSKOLA,
-                             beskrivning = "Antal barn som är inskrivna i förskolan."),
-      antal_barn = list(label = "Antal barn", klar = TRUE, vy = "andel", kon = FALSE,
-                        amne = "Antal barn", metrik = "antal_barn",
-                        vikt = "antal_barn", summa = TRUE, enhet = "",
-                        metrik_label = "Antal barn", kalla = .KALLA_FORSKOLA,
-                        beskrivning = "Antal barn i åldern, oavsett om de går i förskolan eller inte.")
+                             beskrivning = "Andel av alla barn 2-5 år som är inskrivna i förskolan.")
     )
   )
 )
 
 .forskola_bakgrund_val <- c(
-  "Alla" = "_alla_",
-  "Inrikes född, två inrikes födda föräldrar" = "Inrikes född med två inrikes födda föräldrar",
-  "Inrikes född, en utrikes född förälder"    = "Inrikes födda med en inrikes och en utrikes född förälder",
-  "Inrikes född, två utrikes födda föräldrar" = "Inrikes födda med två utrikes födda föräldrar",
-  "Utrikes född"                              = "Utrikes födda"
+  "Alla"          = "_alla_",
+  "Inrikes födda" = "Inrikes födda",
+  "Utrikes födda" = "Utrikes födda"
+)
+
+# Färger för åldersgrupperna: RD:s blå skala, ljust (yngst) till mörkt.
+FORSKOLA_ALDER_FARGER <- c(
+  "2 år" = rd_farg("rd-blue-light", "#8edded"),
+  "3 år" = rd_farg("rd-accent",     "#54a1bd"),
+  "4 år" = rd_farg("rd-primary",    "#158daf"),
+  "5 år" = rd_farg("rd-blue-deep",  "#0074a2")
 )
 
 # ---- UI --------------------------------------------------------------------
@@ -70,12 +67,7 @@ mod_forskola_ui <- function(id) {
         ),
         uiOutput(ns("ar_ui")),
         shinyWidgets::pickerInput(
-          inputId = ns("alder"), label = "Ålder",
-          choices = c("2-5 år" = "_alla_", "2 år" = "2", "3 år" = "3", "4 år" = "4", "5 år" = "5"),
-          selected = "_alla_"
-        ),
-        shinyWidgets::pickerInput(
-          inputId = ns("bakgrund"), label = "Utländsk bakgrund",
+          inputId = ns("bakgrund"), label = "Födelseland",
           choices = .forskola_bakgrund_val, selected = "_alla_"
         ),
 
@@ -128,9 +120,16 @@ mod_forskola_server <- function(id) {
       )
     })
 
-    # Filtrerat på ålder/bakgrund och summerat till år x område x kön.
+    # Könsuppdelat (förvalt), totalt eller åldersgrupper - styr både staplar
+    # och trend.
+    lage <- reactive({ if (is.null(input$kon_lage)) "kon" else input$kon_lage })
+    kon_uppdelat <- reactive({ lage() != "total" })
+    grupp_farger <- reactive({ if (lage() == "alder") FORSKOLA_ALDER_FARGER else NULL })
+
+    # Filtrerat på bakgrund och summerat till år x område x kön/åldersgrupp.
     aktuell_data <- reactive({
-      forskola_summera(hamta_forskola_data(), input$alder, input$bakgrund)
+      forskola_summera(hamta_forskola_data(), input$bakgrund,
+                       grupp = if (lage() == "alder") "alder" else "kon")
     })
 
     valt_indikator <- reactive({
@@ -149,14 +148,10 @@ mod_forskola_server <- function(id) {
       if (is.null(gv) || gv == "_alla_") return("Dalarna")
       dalarna_kommuner$kommun[match(gv, dalarna_kommuner$kommkod)]
     })
-    # Valda filter som text, t.ex. "3 år · Utrikes född".
+    # Valda filter som text, t.ex. "2-5 år · Utrikes födda".
     filter_text <- function() {
-      a <- input$alder
-      bitar <- if (!is.null(a) && a != "_alla_") paste(a, "år") else "2-5 år"
       b <- input$bakgrund
-      if (!is.null(b) && b != "_alla_")
-        bitar <- c(bitar, names(.forskola_bakgrund_val)[.forskola_bakgrund_val == b])
-      paste(bitar, collapse = " \u00b7 ")
+      paste(c("2-5 år", if (!is.null(b) && b != "_alla_") b), collapse = " \u00b7 ")
     }
 
     filter_underrubrik <- function(med_ar = FALSE) {
@@ -193,9 +188,6 @@ mod_forskola_server <- function(id) {
                     geo_niva %in% c("lan", "kommun"))
     })
 
-    # Könsuppdelat (förvalt) eller totalt - styr både staplar och trend.
-    kon_uppdelat <- reactive({ !identical(input$kon_lage, "total") })
-
     # Klick på en stapel väljer området i filtret (länet = Hela Dalarna).
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
@@ -219,7 +211,8 @@ mod_forskola_server <- function(id) {
                div(class = "rd-kon-kontroll",
                    shinyWidgets::radioGroupButtons(
                      inputId  = ns("kon_lage"), label = NULL,
-                     choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
+                     choices  = c("Könsuppdelat" = "kon", "Totalt" = "total",
+                                  "Åldersgrupper" = "alder"),
                      selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
                      size = "sm"))),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
@@ -233,9 +226,10 @@ mod_forskola_server <- function(id) {
       skapa_diagram_andel_omrade_kon(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
                                      vald_kommkod = input$geo_val,
                                      kon_uppdelat = kon_uppdelat(),
-                                     summa = isTRUE(ind$summa),
+                                     grupp_farger = grupp_farger(),
                                      rubrik = paste0(ind$amne, " efter kommun",
-                                                     if (kon_uppdelat()) " och kön" else ""),
+                                                     switch(lage(), kon = " och kön",
+                                                            alder = " och ålder", "")),
                                      underrubrik = paste0("Hemkommun \u00b7 ", filter_text(),
                                                           " \u00b7 år ", input$ar),
                                      kalla = ind$kalla,
@@ -252,10 +246,7 @@ mod_forskola_server <- function(id) {
       if (kon_uppdelat()) {
         skapa_diagram_trend_andel_kon(df, ind$metrik, ind$vikt, ind$metrik_label,
                                       rubrik = rub, underrubrik = sub, kalla = ind$kalla,
-                                      enhet = enh, summa = isTRUE(ind$summa))
-      } else if (isTRUE(ind$summa)) {
-        skapa_diagram_trend(df, ind$metrik, ind$metrik_label, NULL,
-                            rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+                                      enhet = enh, grupp_farger = grupp_farger())
       } else {
         skapa_diagram_trend_andel(df, ind$metrik, ind$vikt, ind$metrik_label, NULL,
                                   rubrik = rub, underrubrik = sub, kalla = ind$kalla,

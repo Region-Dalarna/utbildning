@@ -7,9 +7,9 @@
 #  En rad per år x ålder (2-5) x utländsk bakgrund x kön x område.
 #  antal_barn = alla barn i åldern, antal_forskola = inskrivna i förskolan.
 #
-#  "program" i diagramfunktionernas mening = kön (som i Grundskola).
-#  Ålder och utländsk bakgrund är filter i modulen; forskola_summera()
-#  summerar bort dem och räknar andelen inskrivna.
+#  "program" i diagramfunktionernas mening = kön (som i Grundskola) eller
+#  åldersgrupp ("2 år" ... "5 år"), se forskola_summera(). Född i Sverige
+#  eller utomlands (utrinrfodd_namn) är ett filter i modulen.
 # ============================================================
 
 .forskola_cache <- new.env(parent = emptyenv())
@@ -21,7 +21,7 @@ rensa_forskola_data <- function(rad) {
       ar       = as.integer(ar),
       alder    = as.integer(alder),
       kommkod  = as.character(kommkod),
-      bakgrund = dplyr::coalesce(utlsvbakg_namn, "Uppgift saknas"),
+      bakgrund = dplyr::coalesce(utrinrfodd_namn, "Uppgift saknas"),
       dplyr::across(c(antal_barn, antal_forskola), as.numeric)
     ) |>
     dplyr::select(ar, kommkod, kommun, geo_niva, program, alder, bakgrund,
@@ -39,11 +39,12 @@ hamta_forskola_data <- function(force = FALSE) {
   .forskola_cache$df
 }
 
-# Filtrerar på ålder/bakgrund ("_alla_" = alla) och summerar till en rad per
-# år x område x kön, med andel inskrivna i procent.
-forskola_summera <- function(df, alder = "_alla_", bakgrund = "_alla_") {
-  if (!is.null(alder) && alder != "_alla_") df <- dplyr::filter(df, alder == as.integer(.env$alder))
+# Filtrerar på bakgrund ("_alla_" = alla) och summerar till en rad per
+# år x område x grupp, med andel inskrivna i procent. grupp = "kon" ger
+# program = kön, grupp = "alder" ger program = åldersgrupp ("2 år" osv.).
+forskola_summera <- function(df, bakgrund = "_alla_", grupp = "kon") {
   if (!is.null(bakgrund) && bakgrund != "_alla_") df <- dplyr::filter(df, bakgrund == .env$bakgrund)
+  if (identical(grupp, "alder")) df <- dplyr::mutate(df, program = paste(alder, "år"))
   df |>
     dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
     dplyr::summarise(antal_barn     = sum(antal_barn, na.rm = TRUE),

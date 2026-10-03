@@ -441,15 +441,21 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
 # = "20") i input$<id>_selected. vald_kommkod tonar ned övriga rader.
 # kon_uppdelat = FALSE slår ihop könen till en stapel per område.
 # summa = TRUE summerar andel_kol (antal) i stället för att väga ett medel.
+# grupp_farger (namngiven färgvektor) delar i stället upp på andra grupper än
+# kön: program ska då innehålla gruppnamnen (t.ex. "2 år", "3 år").
 skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
                                            vald_kommkod = NULL, kon_uppdelat = TRUE,
                                            rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                           enhet = " %", summa = FALSE) {
+                                           enhet = " %", summa = FALSE, grupp_farger = NULL) {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
+  egna_grupper <- !is.null(grupp_farger)
+  visa_grupp   <- egna_grupper || kon_uppdelat
   d <- df |>
-    dplyr::filter(geo_niva %in% c("lan", "kommun"), program %in% names(kon_etikett)) |>
+    dplyr::filter(geo_niva %in% c("lan", "kommun"),
+                  program %in% if (egna_grupper) names(grupp_farger) else names(kon_etikett)) |>
     dplyr::mutate(omrade = dplyr::if_else(geo_niva == "lan", "Hela Dalarna", kommun),
-                  kon    = if (kon_uppdelat) unname(kon_etikett[program]) else "Totalt") |>
+                  kon    = if (egna_grupper) program
+                           else if (kon_uppdelat) unname(kon_etikett[program]) else "Totalt") |>
     dplyr::group_by(kommkod, omrade, kon) |>
     dplyr::summarise(
       vikt  = if (summa) 1 else sum(.data[[vikt_kol]], na.rm = TRUE),
@@ -486,11 +492,12 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
   d <- d |>
     dplyr::mutate(
       omrade  = factor(omrade, levels = c(ordning, "Hela Dalarna")),
-      kon     = factor(kon, levels = c("Kvinnor", "Män", "Totalt")),
+      kon     = factor(kon, levels = if (egna_grupper) names(grupp_farger)
+                                     else c("Kvinnor", "Män", "Totalt")),
       # Tona bara ned när det valda området har en egen stapel.
       alfa    = dplyr::if_else(kommkod == vald_rad | !vald_rad %in% kommkod, 1, 0.45),
       tooltip = paste0("<b>", omrade, "</b><br/>",
-                       if (kon_uppdelat) paste0(kon, " \u00b7 ") else "",
+                       if (visa_grupp) paste0(kon, " \u00b7 ") else "",
                        .metrik_ar(metrik_label, ar), ": ",
                        scales::number(andel, accuracy = if (summa) 1 else 0.1,
                                       big.mark = " "), enhet),
@@ -499,12 +506,14 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
   g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = omrade, fill = kon)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id, alpha = alfa),
-      # reverse = TRUE: Kvinnor överst i varje par, samma ordning som legenden
+      # reverse = TRUE: första gruppen överst i varje rad, samma ordning som legenden
       position = ggplot2::position_dodge(width = 0.8, reverse = TRUE), width = 0.75) +
     ggplot2::scale_alpha_identity() +
-    ggplot2::scale_fill_manual(values = c(KON_FARGER, "Totalt" = RD_PRIMARY), name = NULL,
-                               breaks = c("Kvinnor", "Män"),
-                               guide = if (kon_uppdelat) "legend" else "none") +
+    ggplot2::scale_fill_manual(values = if (egna_grupper) grupp_farger
+                                        else c(KON_FARGER, "Totalt" = RD_PRIMARY),
+                               name = NULL,
+                               breaks = if (egna_grupper) names(grupp_farger) else c("Kvinnor", "Män"),
+                               guide = if (visa_grupp) "legend" else "none") +
     ggplot2::scale_x_continuous(labels = function(x) paste0(scales::number(x, big.mark = " "), enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
@@ -518,13 +527,17 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
 # ---- Viktad andel över tid per kön – två linjer ---------------------------
 # Som skapa_diagram_trend_andel(), men med en linje per kön (program =
 # "Kvinna"/"Man"). summa = TRUE summerar andel_kol (antal) i stället.
+# grupp_farger: en linje per egen grupp i stället för per kön (se
+# skapa_diagram_andel_omrade_kon()).
 skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
                                           rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                          enhet = " %", summa = FALSE) {
+                                          enhet = " %", summa = FALSE, grupp_farger = NULL) {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
+  farger <- if (is.null(grupp_farger)) KON_FARGER else grupp_farger
   d <- df |>
-    dplyr::filter(program %in% names(kon_etikett)) |>
-    dplyr::mutate(kon = unname(kon_etikett[program])) |>
+    dplyr::filter(program %in% if (is.null(grupp_farger)) names(kon_etikett) else names(grupp_farger)) |>
+    dplyr::mutate(kon = if (is.null(grupp_farger)) unname(kon_etikett[program]) else program,
+                  kon = factor(kon, levels = names(farger))) |>
     dplyr::group_by(ar, kon) |>
     dplyr::summarise(
       vikt  = if (summa) 1 else sum(.data[[vikt_kol]], na.rm = TRUE),
@@ -544,7 +557,7 @@ skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
     ggplot2::geom_line(linewidth = 0.9) +
     ggiraph::geom_point_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2) +
-    ggplot2::scale_color_manual(values = KON_FARGER, name = NULL) +
+    ggplot2::scale_color_manual(values = farger, name = NULL) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
     ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
     ggplot2::labs(x = NULL, y = NULL,
