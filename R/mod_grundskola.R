@@ -16,6 +16,16 @@
 
 .KALLA_GRUNDSKOLA <- "SCB, Grundskolans slutbetyg åk 9"
 
+# Läggs sist i alla indikatorbeskrivningar: siffrorna bygger på elever med
+# slutbetyg per skolans kommun, medan SCB:s officiella statistik utgår från
+# folkbokföringskommun och även räknar elever som inte slutfört grundskolan.
+.med_jmf <- function(txt) paste(txt, .JMF_SCB_GRUNDSKOLA)
+.JMF_SCB_GRUNDSKOLA <- paste(
+  "Obs! Siffrorna avser elever med slutbetyg och redovisas efter skolans kommun.",
+  "SCB:s officiella statistik utgår från var eleven är folkbokförd och räknar",
+  "även in elever som inte slutfört grundskolan, så nivåerna är inte direkt",
+  "jämförbara.")
+
 grundskola_struktur <- list(
   resultat = list(
     label = "Resultat åk 9",
@@ -23,34 +33,34 @@ grundskola_struktur <- list(
       behorighet = list(label = "Gymnasiebehörighet", klar = TRUE, vy = "andel", kon = FALSE,
                         amne = "Andel med gymnasiebehörighet", metrik = "andel_behorig", vikt = "behorig_underlag",
                         metrik_label = "Andel behöriga (%)", kalla = .KALLA_GRUNDSKOLA,
-                        beskrivning = paste(
+                        beskrivning = .med_jmf(paste(
                           "För att en elev ska vara behörig till gymnasieskolans nationella",
                           "program krävs lägst betyget godkänd i ämnena svenska/svenska som",
-                          "andraspråk, engelska och matematik.")),
+                          "andraspråk, engelska och matematik."))),
       meritvarde = list(label = "Meritvärde", klar = TRUE, vy = "andel", kon = FALSE,
                         amne = "Genomsnittligt meritvärde", metrik = "meritvarde_m2_medel",
                         vikt = "meritvarde_underlag", enhet = "",
                         metrik_label = "Genomsnittligt meritvärde", kalla = .KALLA_GRUNDSKOLA,
-                        beskrivning = paste(
+                        beskrivning = .med_jmf(paste(
                           "Summan av elevens 17 bästa betyg i slutbetyget, inklusive moderna språk",
                           "som språkval (A = 20, B = 17,5, C = 15, D = 12,5, E = 10). Högsta",
-                          "möjliga meritvärde är 340. Genomsnitt bland elever med meritvärde.")),
+                          "möjliga meritvärde är 340. Genomsnitt bland elever med meritvärde."))),
       en = list(label = "Engelska", klar = TRUE, vy = "andel", kon = FALSE,
                amne = "Andel godkänt i Engelska", metrik = "andel_en_godkant", vikt = "en_underlag",
                metrik_label = "Andel godkänt (%)", kalla = .KALLA_GRUNDSKOLA,
-               beskrivning = "Andel godkänt betyg i Engelska, bland elever med ett fastställt betygsresultat i ämnet."),
+               beskrivning = .med_jmf("Andel godkänt betyg i Engelska, bland elever med ett fastställt betygsresultat i ämnet.")),
       ma = list(label = "Matematik", klar = TRUE, vy = "andel", kon = FALSE,
                amne = "Andel godkänt i Matematik", metrik = "andel_ma_godkant", vikt = "ma_underlag",
                metrik_label = "Andel godkänt (%)", kalla = .KALLA_GRUNDSKOLA,
-               beskrivning = "Andel godkänt betyg i Matematik, bland elever med ett fastställt betygsresultat i ämnet."),
+               beskrivning = .med_jmf("Andel godkänt betyg i Matematik, bland elever med ett fastställt betygsresultat i ämnet.")),
       sv = list(label = "Svenska", klar = TRUE, vy = "andel", kon = FALSE,
                amne = "Andel godkänt i Svenska", metrik = "andel_sv_godkant", vikt = "sv_underlag",
                metrik_label = "Andel godkänt (%)", kalla = .KALLA_GRUNDSKOLA,
-               beskrivning = "Andel godkänt betyg i Svenska, bland elever med ett fastställt betygsresultat i ämnet."),
+               beskrivning = .med_jmf("Andel godkänt betyg i Svenska, bland elever med ett fastställt betygsresultat i ämnet.")),
       sva = list(label = "Svenska som andraspråk", klar = TRUE, vy = "andel", kon = FALSE,
                 amne = "Andel godkänt i Svenska som andraspråk", metrik = "andel_sva_godkant", vikt = "sva_underlag",
                 metrik_label = "Andel godkänt (%)", kalla = .KALLA_GRUNDSKOLA,
-                beskrivning = "Andel godkänt betyg i Svenska som andraspråk, bland elever med ett fastställt betygsresultat i ämnet.")
+                beskrivning = .med_jmf("Andel godkänt betyg i Svenska som andraspråk, bland elever med ett fastställt betygsresultat i ämnet."))
     )
   )
 )
