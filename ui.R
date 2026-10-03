@@ -36,6 +36,7 @@ shinyUI(
         id = 'skolform',
         selected = 'Gymnasiet',
 
+        tabPanel('Förskola',      mod_forskola_ui('forskola')),
         tabPanel('Grundskola',    mod_grundskola_ui('grundskola')),
         tabPanel('Gymnasiet',     mod_gymnasiet_ui('gym')),
         tabPanel('Komvux',        mod_komvux_ui('komvux')),
@@ -48,11 +49,11 @@ shinyUI(
           div(class = 'rd-card',
               h2('Om rapporten'),
               p('Den här applikationen visar utbildningsstatistik för Dalarna. ',
-                'Appen omfattar gymnasiet, yrkeshögskola (YH), komvux (inkl. SFI), ',
+                'Appen omfattar förskolan, gymnasiet, yrkeshögskola (YH), komvux (inkl. SFI), ',
                 'högskola, grundskola och folkhögskola.'),
               div(class = 'rd-info',
                   tags$strong('Källa: '),
-                  'Gymnasieantagningen (Dalarnas kommunförbund), SCB (Yrkeshögskolan, Komvux/SFI, Universitet och högskolor, Grundskolans slutbetyg, Folkhögskolan).')
+                  'Gymnasieantagningen (Dalarnas kommunförbund), SCB (Förskolan, Yrkeshögskolan, Komvux/SFI, Universitet och högskolor, Grundskolans slutbetyg, Folkhögskolan).')
           )
         )
       )

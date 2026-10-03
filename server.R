@@ -1,6 +1,7 @@
 shinyServer(function(input, output, session) {
 
   # En modul per skolform.
+  mod_forskola_server('forskola')
   mod_gymnasiet_server('gym')
   mod_yh_server('yh')
   mod_komvux_server('komvux')

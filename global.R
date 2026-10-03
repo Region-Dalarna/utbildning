@@ -26,12 +26,14 @@ source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_sh
 #   R/def_geografi.R            kommuner + Gysam-områden
 #   R/func_data.R               databas-/demodataläsning, gymnasiet   (beror på def_geografi)
 #   R/func_data_folkhogskola.R  databasläsning, Folkhögskola
+#   R/func_data_forskola.R      databasläsning, Förskola
 #   R/func_data_grundskola.R    databasläsning, Grundskola
 #   R/func_data_hogskola.R      databasläsning, Högskola
 #   R/func_data_komvux.R        databasläsning, Komvux/SFI
 #   R/func_data_yh.R            databasläsning, Yrkeshögskola (YH)
 #   R/func_diagram.R            diagramhjälpare (ggiraph)
 #   R/mod_folkhogskola.R        modul: skolform Folkhögskola
+#   R/mod_forskola.R            modul: skolform Förskola
 #   R/mod_grundskola.R          modul: skolform Grundskola
 #   R/mod_gymnasiet.R           modul: skolform Gymnasiet
 #   R/mod_hogskola.R            modul: skolform Högskola

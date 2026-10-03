@@ -440,10 +440,11 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
 # andelen för båda könen tillsammans. Klick på en rad ger kommkod (länet
 # = "20") i input$<id>_selected. vald_kommkod tonar ned övriga rader.
 # kon_uppdelat = FALSE slår ihop könen till en stapel per område.
+# summa = TRUE summerar andel_kol (antal) i stället för att väga ett medel.
 skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
                                            vald_kommkod = NULL, kon_uppdelat = TRUE,
                                            rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                           enhet = " %") {
+                                           enhet = " %", summa = FALSE) {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
   d <- df |>
     dplyr::filter(geo_niva %in% c("lan", "kommun"), program %in% names(kon_etikett)) |>
@@ -451,20 +452,32 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
                   kon    = if (kon_uppdelat) unname(kon_etikett[program]) else "Totalt") |>
     dplyr::group_by(kommkod, omrade, kon) |>
     dplyr::summarise(
-      vikt  = sum(.data[[vikt_kol]], na.rm = TRUE),
-      andel = ifelse(vikt > 0,
-                     sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
-                     NA_real_),
+      vikt  = if (summa) 1 else sum(.data[[vikt_kol]], na.rm = TRUE),
+      andel = if (summa) sum(.data[[andel_kol]], na.rm = TRUE)
+              else ifelse(vikt > 0,
+                          sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
+                          NA_real_),
       .groups = "drop") |>
     dplyr::filter(!is.na(andel))
 
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
 
-  # Sortering: kommunerna efter andel för båda könen (viktat), länet överst.
+  # Antal: länets stapel skulle trycka ihop kommunerna, så länet visas som
+  # total i underrubriken i stället.
+  if (summa && any(d$omrade == "Hela Dalarna")) {
+    lan_tot <- sum(d$andel[d$omrade == "Hela Dalarna"])
+    underrubrik <- paste0(underrubrik, " \u00b7 Hela Dalarna: ",
+                          scales::number(lan_tot, big.mark = " "))
+    d <- dplyr::filter(d, omrade != "Hela Dalarna")
+  }
+
+  # Sortering: kommunerna efter värdet för båda könen (summa eller viktat
+  # medel), länet överst.
   ordning <- d |>
     dplyr::filter(omrade != "Hela Dalarna") |>
     dplyr::group_by(omrade) |>
-    dplyr::summarise(tot = sum(andel * vikt) / sum(vikt), .groups = "drop") |>
+    dplyr::summarise(tot = if (summa) sum(andel) else sum(andel * vikt) / sum(vikt),
+                     .groups = "drop") |>
     dplyr::arrange(tot) |>
     dplyr::pull(omrade)
 
@@ -474,11 +487,13 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
     dplyr::mutate(
       omrade  = factor(omrade, levels = c(ordning, "Hela Dalarna")),
       kon     = factor(kon, levels = c("Kvinnor", "Män", "Totalt")),
-      alfa    = dplyr::if_else(kommkod == vald_rad, 1, 0.45),
+      # Tona bara ned när det valda området har en egen stapel.
+      alfa    = dplyr::if_else(kommkod == vald_rad | !vald_rad %in% kommkod, 1, 0.45),
       tooltip = paste0("<b>", omrade, "</b><br/>",
                        if (kon_uppdelat) paste0(kon, " \u00b7 ") else "",
                        .metrik_ar(metrik_label, ar), ": ",
-                       scales::number(andel, accuracy = 0.1), enhet),
+                       scales::number(andel, accuracy = if (summa) 1 else 0.1,
+                                      big.mark = " "), enhet),
       data_id = kommkod)
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = omrade, fill = kon)) +
@@ -490,7 +505,7 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
     ggplot2::scale_fill_manual(values = c(KON_FARGER, "Totalt" = RD_PRIMARY), name = NULL,
                                breaks = c("Kvinnor", "Män"),
                                guide = if (kon_uppdelat) "legend" else "none") +
-    ggplot2::scale_x_continuous(labels = function(x) paste0(x, enhet),
+    ggplot2::scale_x_continuous(labels = function(x) paste0(scales::number(x, big.mark = " "), enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
@@ -502,24 +517,26 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
 
 # ---- Viktad andel över tid per kön – två linjer ---------------------------
 # Som skapa_diagram_trend_andel(), men med en linje per kön (program =
-# "Kvinna"/"Man").
+# "Kvinna"/"Man"). summa = TRUE summerar andel_kol (antal) i stället.
 skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
                                           rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                          enhet = " %") {
+                                          enhet = " %", summa = FALSE) {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
   d <- df |>
     dplyr::filter(program %in% names(kon_etikett)) |>
     dplyr::mutate(kon = unname(kon_etikett[program])) |>
     dplyr::group_by(ar, kon) |>
     dplyr::summarise(
-      vikt  = sum(.data[[vikt_kol]], na.rm = TRUE),
-      andel = ifelse(vikt > 0,
-                     sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
-                     NA_real_),
+      vikt  = if (summa) 1 else sum(.data[[vikt_kol]], na.rm = TRUE),
+      andel = if (summa) sum(.data[[andel_kol]], na.rm = TRUE)
+              else ifelse(vikt > 0,
+                          sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
+                          NA_real_),
       .groups = "drop") |>
     dplyr::filter(!is.na(andel)) |>
     dplyr::mutate(tooltip = paste0(kon, " \u00b7 ", metrik_label, " ", ar, ": ",
-                                   scales::number(andel, accuracy = 0.1), enhet))
+                                   scales::number(andel, accuracy = if (summa) 1 else 0.1,
+                                                  big.mark = " "), enhet))
 
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
 
