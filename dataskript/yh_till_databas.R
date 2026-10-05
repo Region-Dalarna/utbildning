@@ -22,8 +22,7 @@ library(dplyr)
 library(readr)
 library(DBI)
 
-source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R",
-       encoding = "utf-8", echo = FALSE)
+library(rdshinyappar)   # shiny_uppkoppling_las()/_skriv()
 
 # ---- Inställningar ---------------------------------------------------------
 mapp                  <- "G:/Samhällsanalys/Statistik/YH"   # ändra till mappen med csv-filerna
