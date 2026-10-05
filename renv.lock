@@ -2414,6 +2414,45 @@
       "Maintainer": "Hadley Wickham <hadley@posit.co>",
       "Repository": "CRAN"
     },
+    "rdshinyappar": {
+      "Package": "rdshinyappar",
+      "Version": "0.0.0.9002",
+      "Source": "GitHub",
+      "Title": "Runtime-hjälpare för Region Dalarnas Shiny-appar",
+      "Authors@R": "c( person(\"Peter\", \"Möller\", , \"larspetermoller@gmail.com\", role = c(\"aut\", \"cre\")), person(\"Region Dalarna\", role = \"cph\") )",
+      "Description": "Hjälpfunktioner som Region Dalarnas Shiny-appar använder i drift: databasuppkopplingar (läs/skriv), lösenordshantering via .Renviron, tabellistning i PostGIS, EWKB-till-sf-konvertering och gemensam shiny.telemetry-loggning. Utbrutet ur func_shinyappar.R i Region-Dalarna/funktioner.",
+      "License": "MIT + file LICENSE",
+      "Encoding": "UTF-8",
+      "Roxygen": "list(markdown = TRUE)",
+      "Depends": [
+        "R (>= 4.5.0)"
+      ],
+      "Imports": [
+        "DBI",
+        "jsonlite",
+        "RPostgres",
+        "stats"
+      ],
+      "Suggests": [
+        "sf",
+        "shiny.telemetry",
+        "testthat (>= 3.0.0)",
+        "withr"
+      ],
+      "Config/testthat/edition": "3",
+      "URL": "https://github.com/Region-Dalarna/rdpaket",
+      "BugReports": "https://github.com/Region-Dalarna/rdpaket/issues",
+      "Config/roxygen2/version": "8.1.0",
+      "Author": "Peter Möller [aut, cre], Region Dalarna [cph]",
+      "Maintainer": "Peter Möller <larspetermoller@gmail.com>",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "Region-Dalarna",
+      "RemoteRepo": "rdpaket",
+      "RemoteSubdir": "packages/rdshinyappar",
+      "RemoteRef": "main",
+      "RemoteSha": "90bb3b1fab0f077ffc7bab0c552c17ea1f811dfd"
+    },
     "readr": {
       "Package": "readr",
       "Version": "2.2.0",

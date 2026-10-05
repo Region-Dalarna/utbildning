@@ -14,11 +14,12 @@ library(purrr)
 library(readr)
 library(ggplot2)
 library(ggiraph)
+library(rdshinyappar)
 
 # ---- Delade hjälpfunktioner för Samhällsanalys Shiny-appar -----------------
 # Standardrad för Region Dalarnas Shiny-appar (direkt under library()).
-source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R",
-       encoding = "utf-8", echo = FALSE)
+#source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R",
+#       encoding = "utf-8", echo = FALSE)
 
 # ---- Lokala filer ----------------------------------------------------------
 # Hjälp- och modulfiler i R/ laddas AUTOMATISKT av Shiny (>= 1.5.0), i
