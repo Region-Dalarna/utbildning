@@ -13,17 +13,26 @@
 .geo_cache <- new.env(parent = emptyenv())
 
 .las_kommun_geometri <- function() {
-  if (!requireNamespace("sf", quietly = TRUE)) return(NULL)
-  geo <- tryCatch(
-    dplyr::tbl(shiny_uppkoppling_las("geodata"),
-               dbplyr::in_schema("karta", "kommun_scb")) |>
+  if (!requireNamespace("sf", quietly = TRUE)) {
+    .geo_cache$fel <- "paketet sf är inte installerat"
+    return(NULL)
+  }
+  geo <- tryCatch({
+    con <- shiny_uppkoppling_las("geodata")
+    if (is.null(con)) stop("kunde inte koppla upp mot geodata-databasen")
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+    dplyr::tbl(con, dbplyr::in_schema("karta", "kommun_scb")) |>
       dplyr::filter(str_sub(knkod, 1, 2) == "20") |>
       dplyr::collect() |>
       df_till_sf() |>
       dplyr::rename(kommkod = knkod, kommun = knnamn) |>
-      sf::st_transform(crs = 4326),
-    error = function(e) NULL
-  )
+      sf::st_transform(crs = 4326)
+  }, error = function(e) {
+    # Spara och logga felet - annars syns bara "Kartan kunde inte läsas".
+    .geo_cache$fel <- conditionMessage(e)
+    message("Kartan kunde inte läsas: ", conditionMessage(e))
+    NULL
+  })
   if (is.null(geo)) return(NULL)
   geo$kommkod <- as.character(geo$kommkod)
   dplyr::left_join(geo, kommun_samverkan, by = "kommkod")

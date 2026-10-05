@@ -912,8 +912,9 @@ mod_gymnasiet_server <- function(id) {
 
     output$karta <- ggiraph::renderGirafe({
       k <- skapa_karta_samverkan(input$geo_niva)
-      validate(need(!is.null(k),
-                    "Kartan kunde inte läsas (kräver sf och åtkomst till geodata-databasen)."))
+      validate(need(!is.null(k), paste0(
+        "Kartan kunde inte läsas (kräver sf och åtkomst till geodata-databasen).",
+        if (!is.null(.geo_cache$fel)) paste0(" Fel: ", .geo_cache$fel) else "")))
       k
     })
 
