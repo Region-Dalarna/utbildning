@@ -31,10 +31,18 @@ kalla_rud <- function(tabell) paste0(KALLA_RUD, ", ", tabell)
 # func_data.R). Antal döljs när de är 1 till min_antal - 1, andelar och
 # medelvärden när deras underlag är under min_antal. min_antal = 0 stänger
 # av kontrollen (publicerad statistik).
+#
+# Dolda ANTAL ritas som en grå, streckad platshållarstapel med det fasta
+# värdet ROJ_PLATSHALLARE (tooltip "färre än 4") - man ser att gruppen
+# finns men inte hur stor den är. Dolda ANDELAR får ingen stapel, bara
+# texten "färre än 4", eftersom en fast längd vore missvisande där.
 .dold <- function(n, min_antal) !is.na(n) & n > 0 & n < min_antal
 .dold_text <- function(min_antal) paste("färre än", min_antal)
+ROJ_PLATSHALLARE <- 1.5
+RD_DOLD_FYLL <- "#e1e5e8"
+.dold_fyll_namn <- function(min_antal) paste("Färre än", min_antal)
 
-# Etikett "färre än 5" vid nollan för dolda staplar (liggande diagram).
+# Etikett "färre än 4" vid nollan för dolda andelsstaplar (liggande diagram).
 .dold_etikett <- function(d, y, min_antal) {
   ggplot2::geom_text(data = d, ggplot2::aes(x = 0, y = .data[[y]]),
                      label = .dold_text(min_antal), hjust = -0.08, size = 2.7,
@@ -42,12 +50,15 @@ kalla_rud <- function(tabell) paste0(KALLA_RUD, ", ", tabell)
 }
 
 # Källtext -> caption (med "Källa: "-prefix). NULL ger ingen caption.
-# dolda = TRUE lägger till en rad om att värden har dolts.
-.kalltext <- function(kalla, dolda = FALSE, min_antal = MIN_ANTAL) {
+# dolda = TRUE lägger till en rad om att värden har dolts; platshallare =
+# TRUE förklarar de gråa platshållarstaplarna i stället.
+.kalltext <- function(kalla, dolda = FALSE, min_antal = MIN_ANTAL, platshallare = FALSE) {
   k <- if (is.null(kalla) || !nzchar(kalla)) NULL else paste0("Källa: ", kalla)
   if (!isTRUE(dolda)) return(k)
-  paste(c(k, paste0("Värden som bygger på ", .dold_text(min_antal), " personer visas inte.")),
-        collapse = "\n")
+  rad <- if (isTRUE(platshallare))
+    paste0("Grå streckade staplar: ", .dold_text(min_antal), " (exakt värde visas inte).")
+  else paste0("Värden som bygger på ", .dold_text(min_antal), " personer visas inte.")
+  paste(c(k, rad), collapse = "\n")
 }
 
 # Kortare etiketter för programtypslegenden (lång text klipps annars).
@@ -117,9 +128,11 @@ skapa_diagram_bar <- function(df, metrik, metrik_label, ar = NULL,
     dplyr::filter(antal > 0) |>
     dplyr::mutate(
       dold    = .dold(antal, min_antal),
-      varde   = dplyr::if_else(dold, 0, antal),
+      varde   = dplyr::if_else(dold, ROJ_PLATSHALLARE, as.numeric(antal)),
       # Sortera på det synliga värdet, så att dolda inte avslöjas av ordningen.
       program = forcats::fct_reorder(program, varde),
+      fyll    = dplyr::if_else(dold, RD_DOLD_FYLL, RD_PRIMARY),
+      kant    = dplyr::if_else(dold, RD_TEXT_MUTED, NA_character_),
       tooltip = paste0("<b>", program, "</b><br/>", .metrik_ar(metrik_label, ar), ": ",
                        dplyr::if_else(dold, .dold_text(min_antal), as.character(antal))),
       data_id = as.character(program)
@@ -127,14 +140,15 @@ skapa_diagram_bar <- function(df, metrik, metrik_label, ar = NULL,
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program)) +
     ggiraph::geom_col_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = data_id),
-      fill = RD_PRIMARY, width = 0.74) +
+      ggplot2::aes(tooltip = tooltip, data_id = data_id, fill = fyll, colour = kant),
+      width = 0.74, linetype = "22", linewidth = 0.35) +
+    ggplot2::scale_fill_identity() +
+    ggplot2::scale_colour_identity() +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
+                  caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +
     .rd_tema()
-  if (any(d$dold)) g <- g + .dold_etikett(dplyr::filter(d, dold), "program", min_antal)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
@@ -151,11 +165,13 @@ skapa_diagram_bar_kon <- function(df, metrik_kv, metrik_man, metrik_label, ar = 
       .groups = "drop") |>
     dplyr::filter(Kvinnor + `Män` > 0) |>
     tidyr::pivot_longer(c(Kvinnor, `Män`), names_to = "kon", values_to = "antal") |>
-    dplyr::mutate(dold = .dold(antal, min_antal),
-                  varde = dplyr::if_else(dold, 0, antal)) |>
+    dplyr::mutate(dold  = .dold(antal, min_antal),
+                  varde = dplyr::if_else(dold, ROJ_PLATSHALLARE, as.numeric(antal)),
+                  fyll  = dplyr::if_else(dold, .dold_fyll_namn(min_antal), kon),
+                  kant  = dplyr::if_else(dold, RD_TEXT_MUTED, NA_character_)) |>
     dplyr::group_by(program) |>
     # Sortera på det synliga värdet, så att dolda inte avslöjas av ordningen.
-    dplyr::mutate(tot = sum(varde), alla_dolda = all(dold | antal == 0)) |>
+    dplyr::mutate(tot = sum(varde)) |>
     dplyr::ungroup() |>
     dplyr::mutate(
       program = forcats::fct_reorder(program, tot),
@@ -164,18 +180,21 @@ skapa_diagram_bar_kon <- function(df, metrik_kv, metrik_man, metrik_label, ar = 
                        dplyr::if_else(dold, .dold_text(min_antal), as.character(antal))),
       data_id = as.character(program))
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program, fill = kon)) +
+  dold_namn <- .dold_fyll_namn(min_antal)
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program, fill = fyll, group = kon)) +
     ggiraph::geom_col_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = data_id), width = 0.72) +
-    ggplot2::scale_fill_manual(values = KON_FARGER, name = NULL) +
+      ggplot2::aes(tooltip = tooltip, data_id = data_id, colour = kant),
+      width = 0.72, linetype = "22", linewidth = 0.35) +
+    ggplot2::scale_fill_manual(values = c(KON_FARGER, stats::setNames(RD_DOLD_FYLL, dold_namn)),
+                               breaks = c(names(KON_FARGER), if (any(d$dold)) dold_namn),
+                               name = NULL) +
+    ggplot2::scale_colour_identity() +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
+                  caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top")
-  if (any(d$alla_dolda))
-    g <- g + .dold_etikett(dplyr::distinct(dplyr::filter(d, alla_dolda), program), "program", min_antal)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
@@ -530,8 +549,9 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
       .groups = "drop") |>
     dplyr::filter(!is.na(andel)) |>
     # Röjandekontroll: antal (summa) eller underlag (vikt) under min_antal.
+    # Dolda antal får en grå platshållarstapel, dolda andelar ingen stapel.
     dplyr::mutate(dold  = if (summa) .dold(andel, min_antal) else .dold(vikt, min_antal),
-                  varde = dplyr::if_else(dold, 0, andel))
+                  varde = dplyr::if_else(dold, if (summa) ROJ_PLATSHALLARE else 0, andel))
 
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
 
@@ -550,7 +570,7 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
     dplyr::filter(omrade != "Hela Dalarna") |>
     dplyr::group_by(omrade) |>
     # Synliga värden, så att dolda inte avslöjas av ordningen.
-    dplyr::summarise(tot = if (summa) sum(varde)
+    dplyr::summarise(tot = if (summa) sum(varde[!dold])
                            else if (any(!dold)) sum((varde * vikt)[!dold]) / sum(vikt[!dold]) else 0,
                      .groups = "drop") |>
     dplyr::arrange(tot) |>
@@ -571,28 +591,37 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
                        dplyr::if_else(dold, .dold_text(min_antal),
                                       paste0(scales::number(andel, accuracy = if (summa) 1 else 0.1,
                                                             big.mark = " "), enhet))),
-      data_id = kommkod)
+      data_id = kommkod,
+      platshallare = summa & dold,
+      fyll    = dplyr::if_else(platshallare, .dold_fyll_namn(min_antal), as.character(kon)),
+      kant    = dplyr::if_else(platshallare, RD_TEXT_MUTED, NA_character_))
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = omrade, fill = kon)) +
+  dold_namn <- .dold_fyll_namn(min_antal)
+  bas_farger <- if (egna_grupper) grupp_farger else c(KON_FARGER, "Totalt" = RD_PRIMARY)
+  bas_breaks <- if (egna_grupper) names(grupp_farger) else if (visa_grupp) c("Kvinnor", "Män") else character(0)
+  visa_dold  <- any(d$platshallare)
+  # group = kon håller staplarnas plats i raden, fill kan bli grå för dolda.
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = omrade, fill = fyll, group = kon)) +
     ggiraph::geom_col_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = data_id, alpha = alfa),
+      ggplot2::aes(tooltip = tooltip, data_id = data_id, alpha = alfa, colour = kant),
       # reverse = TRUE: första gruppen överst i varje rad, samma ordning som legenden
-      position = ggplot2::position_dodge(width = 0.8, reverse = TRUE), width = 0.75) +
+      position = ggplot2::position_dodge(width = 0.8, reverse = TRUE), width = 0.75,
+      linetype = "22", linewidth = 0.35) +
     ggplot2::scale_alpha_identity() +
-    ggplot2::scale_fill_manual(values = if (egna_grupper) grupp_farger
-                                        else c(KON_FARGER, "Totalt" = RD_PRIMARY),
+    ggplot2::scale_colour_identity() +
+    ggplot2::scale_fill_manual(values = c(bas_farger, stats::setNames(RD_DOLD_FYLL, dold_namn)),
                                name = NULL,
-                               breaks = if (egna_grupper) names(grupp_farger) else c("Kvinnor", "Män"),
-                               guide = if (visa_grupp) "legend" else "none") +
+                               breaks = c(bas_breaks, if (visa_dold) dold_namn),
+                               guide = if (visa_grupp || visa_dold) "legend" else "none") +
     ggplot2::scale_x_continuous(labels = function(x) paste0(scales::number(x, big.mark = " "), enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
+                  caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = summa)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top")
-  # Etikett när hela raden (alla grupper) är dold.
-  helt_dolda <- d |> dplyr::group_by(omrade) |> dplyr::filter(all(dold)) |>
+  # Andelar: etikett när hela raden (alla grupper) är dold.
+  helt_dolda <- d |> dplyr::group_by(omrade) |> dplyr::filter(all(dold) & !summa) |>
     dplyr::ungroup() |> dplyr::distinct(omrade)
   if (nrow(helt_dolda) > 0) g <- g + .dold_etikett(helt_dolda, "omrade", min_antal)
 

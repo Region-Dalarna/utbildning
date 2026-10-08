@@ -471,7 +471,7 @@ summera_etablering_nedladdning <- function(df) {
 # diagrammen (se func_diagram.R) eller i nedladdningen. Gäller mikrodata
 # från Regionala utvecklingsdatabasen; publicerad statistik (Skolverket,
 # gymnasieantagningen) undantas med min_antal = 0.
-MIN_ANTAL <- 5
+MIN_ANTAL <- 4
 
 # Andelar/medelvärden och den kolumn som är deras underlag (nämnare).
 .ROJ_UNDERLAG <- c(

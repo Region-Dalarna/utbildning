@@ -55,23 +55,28 @@ utanför det här repot (t.ex. `hogskola_etablering`, som är en summering av
 den individnära högskoleuppföljningen).
 
 ## Röjandekontroll
-Värden som bygger på färre än `MIN_ANTAL` (5) personer visas inte, varken i
-diagrammen eller i nedladdningen. Antal mellan 1 och 4 döljs, och andelar och
-medelvärden döljs när deras underlag är färre än 5. I diagrammen står det
-"färre än 5" i stället för en stapel, trendlinjer får ett avbrott, och
-källtexten får en rad om att värden har dolts.
+Värden som bygger på färre än `MIN_ANTAL` (4) personer visas inte, varken i
+diagrammen eller i nedladdningen. Antal mellan 1 och 3 döljs, och andelar och
+medelvärden döljs när deras underlag är färre än 4.
 
-- Gränsen sätts i `MIN_ANTAL` i `R/func_data.R`.
-- Diagramfunktionerna i `R/func_diagram.R` tar `min_antal` (standard `MIN_ANTAL`).
-- Nedladdningen går genom `rojandekontroll_tabell()`; underlaget för varje
-  andel anges i `.ROJ_UNDERLAG`.
-- Publicerad statistik (gymnasieantagningen, Skolverket) undantas med
-  `min_antal = 0`. Det gäller allt i Gymnasiet utom etableringen.
+- **Antal** visas som en grå, streckad platshållarstapel med det fasta värdet
+  `ROJ_PLATSHALLARE` (1,5) och tooltipen "färre än 4" – man ser att gruppen
+  finns men inte hur stor den är.
+- **Andelar och medelvärden** får ingen stapel, bara texten "färre än 4"
+  (en fast längd vore missvisande).
+- **Trendlinjer** får ett avbrott vid dolda år.
+- Källtexten får en rad som förklarar det.
+
+Gränsen sätts i `MIN_ANTAL` i `R/func_data.R`. Diagramfunktionerna i
+`R/func_diagram.R` tar `min_antal` (standard `MIN_ANTAL`), och nedladdningen går
+genom `rojandekontroll_tabell()`; underlaget för varje andel anges i
+`.ROJ_UNDERLAG`. Publicerad statistik (gymnasieantagningen, Skolverket)
+undantas med `min_antal = 0` – det gäller allt i Gymnasiet utom etableringen.
 
 ## Nedladdning
 "Ladda ner aktuellt urval" och "Ladda ner hela datasetet" ger Excelfiler.
 Etableringsdata (Gymnasiet, YH, Högskola) summeras först till diagrammens nivå,
-med medelinkomst bland etablerade (tom när färre än 5 etablerade har uppgift om
+med medelinkomst bland etablerade (tom när färre än 4 etablerade har uppgift om
 inkomst), se `summera_etablering_nedladdning()` i `R/func_data.R`.
 
 ## Kartan
