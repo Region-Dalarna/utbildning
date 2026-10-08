@@ -419,8 +419,9 @@ skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet") {
 # ============================================================
 # Etableringsdatan har rader med en eller ett par personer (och i
 # gymnasiets fall bo-/arbetskommun och inkomst per rad). Nedladdningen
-# summeras därför till samma nivå som diagrammen, utan inkomster, och
-# celler med färre än ETABLERING_MIN_ANTAL personer får tomma värden.
+# summeras därför till samma nivå som diagrammen. Celler med färre än
+# ETABLERING_MIN_ANTAL personer får tomma värden, och medelinkomsten visas
+# bara när minst så många etablerade har uppgift om inkomst.
 ETABLERING_MIN_ANTAL <- 5
 
 summera_etablering_nedladdning <- function(df) {
@@ -428,16 +429,34 @@ summera_etablering_nedladdning <- function(df) {
                        "kommkod", "kommun", "samverkansomrade", "program", "inriktning",
                        "organisationstyp"), names(df))
   status <- c("etabl", "syss", "stud", "arblos", "ovriga")
+
+  # Inkomst som summa + antal etablerade med inkomst. YH/Högskola har dem
+  # färdiga; gymnasiet har forvink_etabl (summa per rad, NA = saknas).
+  if (!all(c("inkomst_summa", "etabl_med_inkomst") %in% names(df))) {
+    df <- if ("forvink_etabl" %in% names(df)) {
+      dplyr::mutate(df,
+        inkomst_summa     = dplyr::coalesce(as.numeric(forvink_etabl), 0),
+        etabl_med_inkomst = dplyr::if_else(is.na(forvink_etabl), 0, as.numeric(etabl)))
+    } else {
+      dplyr::mutate(df, inkomst_summa = 0, etabl_med_inkomst = 0)
+    }
+  }
+
   df |>
     dplyr::group_by(dplyr::across(dplyr::all_of(grupp))) |>
-    dplyr::summarise(dplyr::across(dplyr::all_of(c("antal", status)), ~sum(.x, na.rm = TRUE)),
+    dplyr::summarise(dplyr::across(dplyr::all_of(c("antal", status, "inkomst_summa", "etabl_med_inkomst")),
+                                   ~sum(.x, na.rm = TRUE)),
                      .groups = "drop") |>
     dplyr::mutate(
       dplyr::across(dplyr::all_of(status),
                     ~dplyr::if_else(antal > 0, round(100 * .x / antal, 1), NA_real_),
                     .names = "andel_{.col}"),
+      medelinkomst_etabl = dplyr::if_else(
+        etabl_med_inkomst >= ETABLERING_MIN_ANTAL & antal >= ETABLERING_MIN_ANTAL,
+        round(inkomst_summa / etabl_med_inkomst), NA_real_),
       dplyr::across(dplyr::all_of(c(status, paste0("andel_", status))),
                     ~dplyr::if_else(antal < ETABLERING_MIN_ANTAL, NA_real_, as.numeric(.x)))
     ) |>
+    dplyr::select(-inkomst_summa, -etabl_med_inkomst) |>
     dplyr::arrange(dplyr::across(dplyr::all_of(grupp)))
 }

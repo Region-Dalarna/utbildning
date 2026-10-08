@@ -106,7 +106,12 @@ hamta_komvux_kurser <- function() {
     if (!"granularitet" %in% names(ra)) return(ra[0, ])
     .komvux_cache$kurser <- ra |>
       dplyr::filter(granularitet == "Kurs") |>
-      dplyr::mutate(program = dplyr::coalesce(kursbeskrivning, kurskod, "Okänd kurs")) |>
+      dplyr::mutate(
+        program = dplyr::coalesce(kursbeskrivning, kurskod, "Okänd kurs"),
+        # SFI-kurserna heter bara A-D - prefixa så att de syns som SFI.
+        program = dplyr::if_else(utbildningstyp == "SFI" & !grepl("^sfi", program, ignore.case = TRUE),
+                                 paste("SFI", program), program)
+      ) |>
       dplyr::group_by(ar, kommkod, kommun, geo_niva, utbildningstyp, program) |>
       dplyr::summarise(dplyr::across(dplyr::all_of(.komvux_matt), ~sum(.x, na.rm = TRUE)),
                        .groups = "drop") |>

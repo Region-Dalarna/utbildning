@@ -57,8 +57,9 @@ den individnära högskoleuppföljningen).
 ## Nedladdning
 "Ladda ner aktuellt urval" och "Ladda ner hela datasetet" ger Excelfiler.
 Etableringsdata (Gymnasiet, YH, Högskola) summeras först till diagrammens nivå,
-utan inkomster, och celler med färre än `ETABLERING_MIN_ANTAL` (5) personer
-får tomma värden – se `summera_etablering_nedladdning()` i `R/func_data.R`.
+med medelinkomst bland etablerade. Celler med färre än `ETABLERING_MIN_ANTAL` (5)
+personer – eller färre etablerade med inkomst – får tomma värden, se
+`summera_etablering_nedladdning()` i `R/func_data.R`.
 
 ## Kartan
 `R/func_karta.R` ritar Dalarnas kommuner färgade efter samverkansområde.
