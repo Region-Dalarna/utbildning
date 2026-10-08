@@ -2,50 +2,54 @@
 #  mod_hogskola.R
 #  Shiny-modul för skolformen Högskola.
 #
-#  Byggd på mod_yh.R (samma etableringsvy och diagramfunktioner), med
-#  tre statistikområden:
-#  - Studerande: kursregistreringar per lärosäte. De 15 största lärosätena
-#    för valt område visas, resten slås ihop till "Övriga lärosäten".
-#  - Examina: antal examina per ämnesområde (SUN 2020), med examenstyp
-#    (generell/yrkes/konstnärlig) som filter.
-#  - Etablering: RAKS 1/3/5 år efter examen, per ämnesområde.
+#  PERSPEKTIV (val högst upp):
+#  - "larosate" (standard): studenter, kursregistreringar, examina och
+#    etablering vid ett lärosäte, oavsett var studenterna bor
+#    (regionkod "00" + hskod). Högskolan Dalarna är förvald; andra
+#    lärosäten kan väljas längre ner i sidopanelen.
+#  - "invanare": Dalarnas invånares studier var som helst i landet
+#    (regionkod "20" eller vald kommun).
 #
-#  Kommunvalet avser studentens HEMKOMMUN (se func_data_hogskola.R).
+#  Statistikområden: Studerande (studenter, kursregistreringar), Examina
+#  och Etablering efter examen. Studerande och Examina kan visas
+#  könsuppdelat eller totalt.
+#
+#  Deltagare (studenter) summeras aldrig över lärosäten eller program - se
+#  func_data_hogskola.R. Staplarna visar därför de största programmen resp.
+#  lärosätena utan "Övriga", och totalen hämtas från egen granularitet.
 # ============================================================
 
 .KALLA_HOGSKOLA <- "SCB, Universitet och högskolor"
-.HOGSKOLA_ANTAL_LAROSATEN <- 15
+.HOGSKOLA_ANTAL_STAPLAR <- 15
 
 hogskola_struktur <- list(
   studerande = list(
     label = "Studerande",
     indikatorer = list(
-      kursregistreringar = list(label = "Kursregistreringar", klar = TRUE, vy = "dashboard", kon = FALSE,
-                                amne = "Kursregistreringar",
-                                metrik = "kursregistreringar", metrik_label = "Antal kursregistreringar",
-                                kalla = .KALLA_HOGSKOLA,
-                                beskrivning = paste(
-                                  "Antal kursregistreringar under året bland studenter som bor i",
-                                  "området, per lärosäte (en student kan läsa flera kurser).")),
-      # klar = FALSE: deltagare är unika per program och kan dubbelräknas
-      # när programmen summeras per lärosäte.
-      deltagare = list(label = "Studenter", klar = FALSE, vy = "dashboard", kon = FALSE,
+      deltagare = list(label = "Studenter", klar = TRUE, vy = "dashboard", kon = TRUE,
                        amne = "Antal studenter",
                        metrik = "deltagare", metrik_label = "Antal studenter",
                        kalla = .KALLA_HOGSKOLA,
-                       beskrivning = "Antal unika studenter under året, per lärosäte.")
+                       beskrivning = paste(
+                         "Antal unika studenter under året. En student kan läsa flera program",
+                         "eller vid flera lärosäten, så staplarna summerar inte till totalen.")),
+      kursregistreringar = list(label = "Kursregistreringar", klar = TRUE, vy = "dashboard", kon = TRUE,
+                                amne = "Kursregistreringar",
+                                metrik = "kursregistreringar", metrik_label = "Antal kursregistreringar",
+                                kalla = .KALLA_HOGSKOLA,
+                                beskrivning = "Antal kursregistreringar under året (en student kan läsa flera kurser).")
     )
   ),
   examina = list(
     label = "Examina",
     indikatorer = list(
-      antal_examina = list(label = "Examina", klar = TRUE, vy = "dashboard", kon = FALSE,
+      antal_examina = list(label = "Examina", klar = TRUE, vy = "dashboard", kon = TRUE,
                            amne = "Examina",
                            metrik = "antal_examina", metrik_label = "Antal examina",
                            kalla = .KALLA_HOGSKOLA,
                            beskrivning = paste(
-                             "Antal utfärdade examina under året till studenter som bor i området,",
-                             "per ämnesområde (SUN 2020). En person kan ta flera examina."))
+                             "Antal utfärdade examina under året per ämnesområde (SUN 2020).",
+                             "En person kan ta flera examina."))
     )
   ),
   etablering = list(
@@ -74,11 +78,30 @@ hogskola_struktur <- list(
   )
 )
 
+# Summerar ett mått per grupp och kön till kolumnerna kv/man (för
+# skapa_diagram_bar_kon()/skapa_diagram_trend_kon()).
+.kon_bred <- function(d, metrik, grupp) {
+  d |>
+    dplyr::filter(kon %in% c("Kvinna", "Man")) |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(c(grupp, "kon")))) |>
+    dplyr::summarise(v = sum(.data[[metrik]], na.rm = TRUE), .groups = "drop") |>
+    tidyr::pivot_wider(names_from = kon, values_from = v, values_fill = 0) |>
+    dplyr::rename(kv = dplyr::any_of("Kvinna"), man = dplyr::any_of("Man"))
+}
+
 # ---- UI --------------------------------------------------------------------
 mod_hogskola_ui <- function(id) {
   ns <- NS(id)
 
   tagList(
+    div(
+      class = "rd-segmented",
+      shinyWidgets::radioGroupButtons(
+        inputId  = ns("perspektiv"), label = NULL,
+        choices  = c("Lärosäte" = "larosate", "Dalarnas invånare" = "invanare"),
+        selected = "larosate"
+      )
+    ),
     div(
       class = "rd-segmented",
       shinyWidgets::radioGroupButtons(
@@ -97,13 +120,20 @@ mod_hogskola_ui <- function(id) {
         uiOutput(ns("examenstyp_ui")),
         tags$hr(),
 
-        shinyWidgets::pickerInput(
-          inputId = ns("geo_val"), label = "Område (hemkommun)",
-          choices = c("Hela Dalarna" = "_alla_", geo_val_kommun),
-          selected = "_alla_",
-          options = shinyWidgets::pickerOptions(liveSearch = TRUE)
+        conditionalPanel(
+          condition = "input.perspektiv == 'invanare'", ns = ns,
+          shinyWidgets::pickerInput(
+            inputId = ns("geo_val"), label = "Område (hemkommun)",
+            choices = c("Hela Dalarna" = "_alla_", geo_val_kommun),
+            selected = "_alla_",
+            options = shinyWidgets::pickerOptions(liveSearch = TRUE)
+          )
         ),
         uiOutput(ns("ar_ui")),
+        conditionalPanel(
+          condition = "input.perspektiv == 'larosate'", ns = ns,
+          uiOutput(ns("larosate_ui"))
+        ),
 
         tags$hr(),
         div(
@@ -132,6 +162,12 @@ mod_hogskola_server <- function(id) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    perspektiv <- reactive({ if (is.null(input$perspektiv)) "larosate" else input$perspektiv })
+    ar_larosate <- reactive({ perspektiv() == "larosate" })
+    hskod_val <- reactive({
+      if (is.null(input$larosate)) HOGSKOLA_STANDARD_HSKOD else input$larosate
+    })
+
     output$indikator_ui <- renderUI({
       omr <- hogskola_struktur[[ req(input$omrade) ]]
       ch  <- .choices_fran_lista(omr$indikatorer)
@@ -154,11 +190,11 @@ mod_hogskola_server <- function(id) {
       )
     })
 
-    aktuell_data <- reactive({
-      omr <- req(input$omrade)
-      if (omr == "examina")         hamta_hogskola_examen()
-      else if (omr == "etablering") hamta_hogskola_etablering()
-      else                          hamta_hogskola_aktivitet()
+    output$larosate_ui <- renderUI({
+      lar <- hogskola_larosaten()
+      selectInput(ns("larosate"), "Lärosäte",
+                  choices = stats::setNames(lar$hskod, lar$hskod_namn),
+                  selected = isolate(hskod_val()))
     })
 
     valt_indikator <- reactive({
@@ -173,27 +209,108 @@ mod_hogskola_server <- function(id) {
       if (is.null(v)) "dashboard" else v
     })
 
+    # Valt lärosäte eller område, för rubriker.
     geo_label <- reactive({
+      if (ar_larosate()) {
+        lar <- hogskola_larosaten()
+        return(lar$hskod_namn[match(hskod_val(), lar$hskod)])
+      }
       gv <- input$geo_val
-      if (is.null(gv) || gv == "_alla_") return("Dalarna")
-      dalarna_kommuner$kommun[match(gv, dalarna_kommuner$kommkod)]
+      if (is.null(gv) || gv == "_alla_") return("Dalarnas invånare")
+      paste("Invånare i", dalarna_kommuner$kommun[match(gv, dalarna_kommuner$kommkod)])
     })
 
     # Vad staplarna visar i aktuellt statistikområde.
     dim_label <- reactive({
-      if (identical(input$omrade, "studerande")) "lärosäte" else "ämnesområde"
+      if (identical(input$omrade, "studerande")) {
+        if (ar_larosate()) "program" else "lärosäte"
+      } else "ämnesområde"
     })
 
     filter_underrubrik <- function(med_ar = FALSE) {
       txt <- geo_label()
       et <- input$examenstyp
       if (identical(input$omrade, "examina") && !is.null(et) && et != "_alla_")
-        txt <- paste0(txt, " \u00b7 ", et)
-      if (med_ar) txt <- paste0(txt, " år ", req(input$ar))
+        txt <- paste0(txt, " · ", et)
+      if (med_ar) txt <- paste0(txt, " · år ", req(input$ar))
       txt
     }
 
-    # ---- Etablering: uppföljningsår (1/3/5) --------------------------------
+    # Filtrerar rader på perspektiv: lärosätet i riket, eller boendeområdet.
+    filtrera_perspektiv <- function(d, med_hskod = TRUE) {
+      if (ar_larosate()) {
+        d <- dplyr::filter(d, kommkod == "00")
+        if (med_hskod) d <- dplyr::filter(d, hskod == hskod_val())
+        return(d)
+      }
+      gv <- input$geo_val
+      if (is.null(gv) || gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
+      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+    }
+
+    # Könsuppdelat (förvalt) eller totalt - för Studerande och Examina.
+    kon_uppdelat <- reactive({ !identical(input$kon_lage, "total") })
+
+    program_vald <- reactiveVal(NULL)
+    observeEvent(input$d_bar_selected, {
+      sel <- input$d_bar_selected
+      program_vald(if (length(sel) >= 1) sel else NULL)
+    }, ignoreNULL = FALSE)
+    observeEvent(list(input$omrade, input$perspektiv, input$larosate), {
+      program_vald(NULL)
+    }, ignoreInit = TRUE)
+
+    # ---- Studerande och examina: stapel- och totaldata ----------------------
+    # stapel: en rad per (ar, program, kon) - programmen (lärosätesperspektivet)
+    #         resp. lärosätena (invånarperspektivet), eller ämnesområden (examina).
+    # total:  en rad per (ar, kon) från egen granularitet (aldrig summa av stapel).
+    stapel_data <- reactive({
+      omr <- req(input$omrade)
+      if (omr == "examina") {
+        d <- filtrera_perspektiv(hamta_hogskola_examen())
+        et <- input$examenstyp
+        if (!is.null(et) && et != "_alla_") d <- dplyr::filter(d, examenstyp == et)
+        return(d)
+      }
+      ak <- hamta_hogskola_aktivitet()
+      if (ar_larosate()) filtrera_perspektiv(dplyr::filter(ak, granularitet == "Program"))
+      else filtrera_perspektiv(dplyr::filter(ak, granularitet == "LarosateKon"), med_hskod = FALSE)
+    })
+
+    total_data <- reactive({
+      if (identical(input$omrade, "examina")) return(stapel_data())   # examina går att summera
+      ak <- hamta_hogskola_aktivitet()
+      if (ar_larosate()) filtrera_perspektiv(dplyr::filter(ak, granularitet == "LarosateKon"))
+      else filtrera_perspektiv(dplyr::filter(ak, granularitet == "TotaltKon"), med_hskod = FALSE)
+    })
+
+    # Staplar för valt år: de största programmen/lärosätena (ingen "Övriga",
+    # eftersom deltagare inte får summeras över dem).
+    stapel_ar <- reactive({
+      ind <- valt_indikator()
+      d <- dplyr::filter(stapel_data(), ar == as.integer(req(input$ar)))
+      if (input$omrade == "examina" || nrow(d) == 0) return(d)
+      storst <- d |>
+        dplyr::group_by(program) |>
+        dplyr::summarise(n = sum(.data[[ind$metrik]], na.rm = TRUE), .groups = "drop") |>
+        dplyr::slice_max(n, n = .HOGSKOLA_ANTAL_STAPLAR, with_ties = FALSE) |>
+        dplyr::pull(program)
+      dplyr::filter(d, program %in% storst)
+    })
+
+    # ---- Etablering ------------------------------------------------------------
+    etablering_alla <- reactive({
+      if (ar_larosate()) hamta_hogskola_etablering(hskod_val()) else hamta_hogskola_etablering()
+    })
+    # Raderna för valt lärosäte (riket) eller valt område.
+    etablering_omrade <- reactive({
+      d <- etablering_alla()
+      if (ar_larosate()) return(dplyr::filter(d, geo_niva == "riket"))
+      gv <- input$geo_val
+      if (is.null(gv) || gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
+      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+    })
+
     antal_ar_vald <- reactiveVal("1")
     lapply(c("1", "3", "5", "alla"), function(v) {
       observeEvent(input[[paste0("arbtn_", v)]], { antal_ar_vald(v) }, ignoreInit = TRUE)
@@ -201,17 +318,14 @@ mod_hogskola_server <- function(id) {
 
     output$prog_niva_ui <- renderUI({
       req(valt_vy() == "etablering")
-      d_et   <- hamta_hogskola_etablering()
+      d_et   <- etablering_omrade()
       alla   <- c("1", "3", "5")
       ar_val <- tryCatch(as.integer(input$ar), error = function(e) NA_integer_)
-      if (is.na(ar_val))
-        ar_val <- max(d_et$ar[d_et$geo_niva %in% c("lan", "kommun")], na.rm = TRUE)
+      if (is.na(ar_val) && nrow(d_et) > 0) ar_val <- max(d_et$ar, na.rm = TRUE)
 
       har_data <- function(av) {
-        r <- d_et[d_et$antal_ar == as.integer(av) &
-                    d_et$geo_niva %in% c("lan", "kommun") &
-                    d_et$ar == ar_val, , drop = FALSE]
-        nrow(r) > 0 && any(!is.na(r$syss) | !is.na(r$stud) | !is.na(r$arblos) | !is.na(r$etabl))
+        r <- d_et[d_et$antal_ar == as.integer(av) & d_et$ar %in% ar_val, , drop = FALSE]
+        nrow(r) > 0 && any(!is.na(r$etabl))
       }
       tillg <- alla[vapply(alla, har_data, logical(1))]
       if (length(tillg) == 0) tillg <- alla
@@ -240,8 +354,7 @@ mod_hogskola_server <- function(id) {
 
     output$program_filter_ui <- renderUI({
       req(valt_vy() == "etablering")
-      d_et <- hamta_hogskola_etablering()
-      prg <- sort(unique(stats::na.omit(d_et$program[d_et$geo_niva %in% c("kommun", "lan")])))
+      prg <- sort(unique(stats::na.omit(etablering_omrade()$program)))
       tidigare <- isolate(input$program_filter)
       vald <- if (!is.null(tidigare) && length(tidigare) > 0 && all(tidigare %in% prg)) tidigare else prg
       shinyWidgets::pickerInput(
@@ -254,6 +367,36 @@ mod_hogskola_server <- function(id) {
       )
     })
 
+    etablering_dalarna <- reactive({
+      req(valt_vy() == "etablering")
+      d  <- etablering_omrade()
+      pf <- input$program_filter
+      if (!is.null(pf) && length(pf) > 0) d <- dplyr::filter(d, program %in% pf)
+      d |>
+        dplyr::group_by(ar, exam_ar_interval, antal_ar, program, namn) |>
+        dplyr::summarise(
+          dplyr::across(c(syss, stud, arblos, ovriga, etabl, antal,
+                          etabl_med_inkomst, inkomst_summa),
+                        ~sum(.x, na.rm = TRUE)),
+          .groups = "drop")
+    })
+
+    # Jämförelse: riket, alla lärosäten (Region-raderna).
+    etablering_riket_serie <- reactive({
+      req(valt_vy() == "etablering")
+      yh_etablering_riket(hamta_hogskola_etablering(), program_vald(), valt_indikator()$metrik)
+    })
+
+    etablering_riket_andel <- reactive({
+      req(valt_vy() == "etablering")
+      av <- antal_ar_vald()
+      if (identical(av, "alla")) return(NA_real_)
+      df <- etablering_riket_serie() |>
+        dplyr::filter(antal_ar == as.integer(av), ar == as.integer(req(input$ar)))
+      if (nrow(df) == 0) return(NA_real_)
+      mean(df$andel_riket, na.rm = TRUE)
+    })
+
     output$examenstyp_ui <- renderUI({
       req(identical(input$omrade, "examina"))
       shinyWidgets::radioGroupButtons(
@@ -264,132 +407,55 @@ mod_hogskola_server <- function(id) {
       )
     })
 
-    program_vald <- reactiveVal(NULL)
-    observeEvent(input$d_bar_selected, {
-      sel <- input$d_bar_selected
-      program_vald(if (length(sel) >= 1) sel else NULL)
-    }, ignoreNULL = FALSE)
-    observeEvent(input$omrade, { program_vald(NULL) }, ignoreInit = TRUE)
-
     output$ar_ui <- renderUI({
-      d  <- aktuell_data()
       vy <- tryCatch(valt_vy(), error = function(e) "dashboard")
       tidigare_ar <- isolate(input$ar)
       behall <- function(giltiga, standard) {
         if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(giltiga)) tidigare_ar else standard
       }
-
       if (vy == "etablering") {
-        ep <- d |>
-          dplyr::filter(geo_niva %in% c("lan", "kommun")) |>
+        ep <- etablering_omrade() |>
           dplyr::distinct(ar, exam_ar_interval) |>
           dplyr::arrange(dplyr::desc(ar))
-        etiketter <- gsub("-", "\u2013", ep$exam_ar_interval, fixed = TRUE)
-        choices <- stats::setNames(ep$ar, etiketter)
-        selectInput(ns("ar"), "Examensperiod", choices = choices,
+        req(nrow(ep) > 0)
+        etiketter <- gsub("-", "–", ep$exam_ar_interval, fixed = TRUE)
+        selectInput(ns("ar"), "Examensperiod", choices = stats::setNames(ep$ar, etiketter),
                     selected = behall(ep$ar, ep$ar[1]))
       } else {
-        ar <- sort(unique(d$ar), decreasing = TRUE)
+        ar <- sort(unique(stapel_data()$ar), decreasing = TRUE)
+        req(length(ar) > 0)
         selectInput(ns("ar"), "År", choices = ar, selected = behall(ar, max(ar)))
       }
     })
 
-    data_bas <- reactive({
-      d  <- aktuell_data()
-      gv <- req(input$geo_val)
-      d  <- if (gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
-            else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
-
-      omr <- input$omrade
-      if (identical(omr, "examina")) {
-        et <- input$examenstyp
-        if (!is.null(et) && et != "_alla_") d <- dplyr::filter(d, examenstyp == et)
-      }
-      # Studerande: behåll de största lärosätena (över alla år, så att samma
-      # lärosäten visas oavsett år) och slå ihop resten.
-      if (identical(omr, "studerande") && nrow(d) > 0) {
-        storst <- d |>
-          dplyr::group_by(program) |>
-          dplyr::summarise(n = sum(kursregistreringar, na.rm = TRUE), .groups = "drop") |>
-          dplyr::slice_max(n, n = .HOGSKOLA_ANTAL_LAROSATEN, with_ties = FALSE) |>
-          dplyr::pull(program)
-        d <- d |>
-          dplyr::mutate(program = dplyr::if_else(program %in% storst, program, "Övriga lärosäten")) |>
-          dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
-          dplyr::summarise(dplyr::across(c(kursregistreringar, deltagare), ~sum(.x, na.rm = TRUE)),
-                           .groups = "drop")
-      }
-      d
-    })
-    data_ar <- reactive({
-      req(input$ar)
-      dplyr::filter(data_bas(), ar == as.integer(input$ar))
-    })
-
-    # ---- Etablering: Dalarna-data --------------------------------------------
-    etablering_dalarna <- reactive({
-      req(valt_vy() == "etablering")
-      d  <- hamta_hogskola_etablering()
-      gv <- input$geo_val
-      d  <- if (is.null(gv) || gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
-      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
-
-      pf <- input$program_filter
-      if (!is.null(pf) && length(pf) > 0) d <- dplyr::filter(d, program %in% pf)
-
-      d |>
-        dplyr::group_by(ar, exam_ar_interval, antal_ar, program, namn) |>
-        dplyr::summarise(
-          dplyr::across(c(syss, stud, arblos, ovriga, etabl, antal,
-                          etabl_med_inkomst, inkomst_summa),
-                        ~sum(.x, na.rm = TRUE)),
-          .groups = "drop")
-    })
-
-    etablering_riket_serie <- reactive({
-      req(valt_vy() == "etablering")
-      ind  <- valt_indikator()
-      prog <- program_vald()
-      yh_etablering_riket(hamta_hogskola_etablering(), prog, ind$metrik)
-    })
-
-    etablering_riket_andel <- reactive({
-      req(valt_vy() == "etablering")
-      av <- antal_ar_vald()
-      if (identical(av, "alla")) return(NA_real_)
-      antal_ar_v <- as.integer(av)
-      df <- etablering_riket_serie() |>
-        dplyr::filter(antal_ar == antal_ar_v, ar == as.integer(req(input$ar)))
-      if (nrow(df) == 0) return(NA_real_)
-      mean(df$andel_riket, na.rm = TRUE)
-    })
-
     output$brodsmula <- renderText({
       omr <- hogskola_struktur[[req(input$omrade)]]$label
-      paste0("Högskola \u203a ", omr, " \u203a ", valt_indikator()$label)
+      persp <- if (ar_larosate()) "Lärosäte" else "Dalarnas invånare"
+      paste0("Högskola › ", persp, " › ", omr, " › ", valt_indikator()$label)
     })
 
     output$vy <- renderUI({
       ind <- valt_indikator()
-      if (!isTRUE(ind$klar)) {
-        return(div(class = "rd-info", "Den här vyn är inte inlagd än."))
-      }
+      if (!isTRUE(ind$klar)) return(div(class = "rd-info", "Den här vyn är inte inlagd än."))
       hint <- tags$p(class = "rd-hint rd-hint--bar",
-                     paste0("Klicka på en stapel i diagrammet för att se statistik för ett specifikt ",
+                     paste0("Klicka på en stapel i diagrammet för att se utvecklingen för ett specifikt ",
                             dim_label(), "."))
-
-      if (valt_vy() == "etablering") {
-        fluidRow(
-          column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
-          column(5, div(class = "rd-subcard",
-                        ggiraph::girafeOutput(ns("d_etablering_trend"), height = "380px")))
-        )
-      } else {
-        fluidRow(
-          column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
-          column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
-        )
-      }
+      notis <- if (identical(ind$metrik, "deltagare"))
+        tags$p(class = "rd-hint",
+               paste0("En student kan läsa ", if (ar_larosate()) "flera program" else "vid flera lärosäten",
+                      " samma år, så staplarna summerar inte till det totala antalet studenter."))
+      kon_kontroll <- if (isTRUE(ind$kon))
+        div(class = "rd-kon-kontroll",
+            shinyWidgets::radioGroupButtons(
+              inputId  = ns("kon_lage"), label = NULL,
+              choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
+              selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+              size = "sm"))
+      trend_id <- if (valt_vy() == "etablering") "d_etablering_trend" else "d_trend"
+      fluidRow(
+        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), kon_kontroll, hint, notis),
+        column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns(trend_id), height = "380px")))
+      )
     })
 
     output$d_bar <- ggiraph::renderGirafe({
@@ -400,16 +466,27 @@ mod_hogskola_server <- function(id) {
         d <- etablering_dalarna()
         validate(need(nrow(d) > 0, "Inga data för valt urval."))
         d <- dplyr::filter(d, ar == as.integer(req(input$ar)))
-        skapa_diagram_etablering_bar(d, ind$metrik, ind$metrik_label,
-                                     antal_ar_val = antal_ar_vald(),
-                                     riket_andel = etablering_riket_andel(),
-                                     rubrik = ind$amne, underrubrik = sub, kalla = ind$kalla)
+        return(skapa_diagram_etablering_bar(d, ind$metrik, ind$metrik_label,
+                                            antal_ar_val = antal_ar_vald(),
+                                            riket_andel = etablering_riket_andel(),
+                                            rubrik = ind$amne, underrubrik = sub, kalla = ind$kalla))
+      }
+
+      df <- stapel_ar()
+      validate(need(nrow(df) > 0, "Inga data för valt urval."))
+      # Studenter: totalen (unika) i underrubriken, eftersom staplarna inte summerar till den.
+      if (identical(ind$metrik, "deltagare")) {
+        tot <- sum(dplyr::filter(total_data(), ar == as.integer(input$ar))$deltagare, na.rm = TRUE)
+        sub <- paste0(sub, " · Totalt ", scales::number(tot, big.mark = " "), " studenter")
+      }
+      rub <- paste0(ind$amne, " efter ", dim_label())
+      if (kon_uppdelat()) {
+        skapa_diagram_bar_kon(.kon_bred(df, ind$metrik, "program"), "kv", "man",
+                              ind$metrik_label, input$ar,
+                              rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       } else {
-        df <- data_ar()
-        validate(need(nrow(df) > 0, "Inga data för valt urval."))
         skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
-                          rubrik = paste0(ind$amne, " efter ", dim_label()),
-                          underrubrik = sub, kalla = ind$kalla)
+                          rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       }
     })
 
@@ -417,43 +494,58 @@ mod_hogskola_server <- function(id) {
       ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "etablering")
       df_dal <- etablering_dalarna()
       validate(need(nrow(df_dal) > 0, "Inga data."))
-      df_rik <- etablering_riket_serie()
       prog   <- program_vald()
-      rub    <- if (is.null(prog)) ind$amne else prog
       antal_ar_in <- antal_ar_vald()
       antal_ar_v  <- if (identical(antal_ar_in, "alla")) 1L else as.integer(antal_ar_in)
-      sub <- paste0(filter_underrubrik(), " \u00b7 ", antal_ar_v,
+      sub <- paste0(filter_underrubrik(), " · ", antal_ar_v,
                     " år efter examen, per examensperiod")
       df_prog <- if (is.null(prog)) df_dal else dplyr::filter(df_dal, namn == prog)
-      skapa_diagram_etablering_trend(df_prog, df_rik,
+      skapa_diagram_etablering_trend(df_prog, etablering_riket_serie(),
                                      ind$metrik, ind$metrik_label,
                                      antal_ar_val = antal_ar_v,
-                                     rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+                                     rubrik = if (is.null(prog)) ind$amne else prog,
+                                     underrubrik = sub, kalla = ind$kalla)
     })
 
     output$d_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      df   <- data_bas()
-      validate(need(nrow(df) > 0, "Inga data."))
       prog <- program_vald()
-      rub  <- if (is.null(prog)) paste0(ind$amne, " \u2013 utveckling över tid") else paste0(ind$amne, " \u2013 ", prog)
-      sub  <- filter_underrubrik()
-      skapa_diagram_trend(df, ind$metrik, ind$metrik_label, prog,
-                          rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      # Valt program/lärosäte: dess egen serie. Annars totalen.
+      df <- if (is.null(prog)) total_data() else dplyr::filter(stapel_data(), program == prog)
+      validate(need(nrow(df) > 0, "Inga data."))
+      rub <- if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
+             else paste0(ind$amne, " – ", prog)
+      sub <- filter_underrubrik()
+      if (kon_uppdelat()) {
+        skapa_diagram_trend_kon(.kon_bred(df, ind$metrik, "ar"), "kv", "man", ind$metrik_label,
+                                rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      } else {
+        skapa_diagram_trend(df, ind$metrik, ind$metrik_label, NULL,
+                            rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      }
     })
 
+    # ---- Nedladdning -----------------------------------------------------------
     # Etableringsdata laddas ner summerad (se summera_etablering_nedladdning()).
-    nedladdning <- function(d) {
-      if (identical(input$omrade, "etablering")) summera_etablering_nedladdning(d) else d
+    urval_data <- function() {
+      if (valt_vy() == "etablering")
+        return(summera_etablering_nedladdning(
+          dplyr::filter(etablering_omrade(), ar == as.integer(req(input$ar)))))
+      stapel_ar()
+    }
+    alla_data <- function() {
+      if (valt_vy() == "etablering") return(summera_etablering_nedladdning(etablering_omrade()))
+      stapel_data()
     }
 
     output$ladda_ner <- downloadHandler(
-      filename = function() paste0("hogskola_", input$omrade, "_", input$indikator, "_", input$ar, ".xlsx"),
-      content  = function(file) skriv_gymnasie_excel(nedladdning(data_ar()), file, blad = "Högskola")
+      filename = function() paste0("hogskola_", perspektiv(), "_", input$omrade, "_",
+                                   input$indikator, "_", input$ar, ".xlsx"),
+      content  = function(file) skriv_gymnasie_excel(urval_data(), file, blad = "Högskola")
     )
     output$ladda_ner_alla <- downloadHandler(
-      filename = function() "hogskola_hela_datasetet.xlsx",
-      content  = function(file) skriv_gymnasie_excel(nedladdning(aktuell_data()), file, blad = "Högskola")
+      filename = function() paste0("hogskola_", perspektiv(), "_", input$omrade, ".xlsx"),
+      content  = function(file) skriv_gymnasie_excel(alla_data(), file, blad = "Högskola")
     )
   })
 }

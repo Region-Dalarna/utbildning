@@ -2,20 +2,28 @@
 #  func_data_hogskola.R
 #  Dataåtkomst för högskolestatistik.
 #
-#  Källor (oppna_data.mikro_db):
-#  - hogskola_aktivitet    kursregistreringar/deltagare per lärosäte och program
-#  - hogskola_examen       antal examina per examenstyp och SUN 2020-inriktning
-#  - hogskola_etablering   RAKS-etablering 1/3/5 år efter examen, summerad per
-#                          region och ämnesområde (separat inläsningsskript)
-#                          (samma kolumner som yh_uppfoljning)
+#  Källor (oppna_data.mikro_db), regionkod = personens BOENDEKOMMUN:
+#  - hogskola_aktivitet   deltagare (unika studenter) och kursregistreringar.
+#                         granularitet: Totalt, TotaltKon, Larosate,
+#                         LarosateKon, Program (år x lärosäte x program x kön).
+#  - hogskola_examen      antal examina per lärosäte, huvudområde, examenstyp
+#                         och kön (räknar examina, går att summera).
+#  - hogskola_etablering  RAKS-etablering 1/3/5 år efter examen.
+#                         granularitet: Region (summerat över lärosäten) och
+#                         Larosate (riket per lärosäte).
 #
-#  regionkod/region är studentens HEMKOMMUN, inte lärosätets ort.
+#  Två perspektiv i modulen:
+#  - Lärosäte: regionkod "00" (alla studenter i landet) + valt hskod.
+#  - Dalarnas invånare: regionkod "20" eller vald kommun.
 #
-#  "program" i diagramfunktionernas mening:
-#  - Studerande: lärosäte (hskod_namn). De minsta slås ihop till "Övriga
-#    lärosäten" i modulen.
-#  - Examina/etablering: ämnesområde = SUN 2020:s bredaste inriktning
-#    (förstasiffran i sun2020inr resp. huvomgrp).
+#  DUBBELRÄKNING: deltagare får inte summeras över lärosäten eller program
+#  (samma person kan finnas på flera). Totaler läses därför från
+#  Totalt/TotaltKon resp. LarosateKon, aldrig som summa av finare rader.
+#  Summering över kön är säker.
+#
+#  "program" i diagramfunktionernas mening: programnamn (Program-rader),
+#  lärosätesnamn (Larosate-rader) eller ämnesområde (examen/etablering =
+#  SUN 2020:s bredaste inriktning).
 # ============================================================
 
 # SUN 2020, bredaste inriktningsnivå (förstasiffran i inriktningskoden),
@@ -38,65 +46,86 @@
 .examenstyp <- c("G" = "Generell examen", "K" = "Konstnärlig examen",
                  "Y" = "Yrkesexamen", "P" = "Yrkesexamen")
 
-# ---- Studerande (aktivitet) -----------------------------------------------
-.hogskola_aktivitet_cache <- new.env(parent = emptyenv())
+# Högskolan Dalarna - förvalt lärosäte.
+HOGSKOLA_STANDARD_HSKOD <- "007"
 
-rensa_hogskola_aktivitet <- function(rad) {
-  rad |>
-    dplyr::rename(kommkod = regionkod, kommun = region, program = hskod_namn) |>
-    dplyr::mutate(ar = as.integer(ar), kommkod = as.character(kommkod)) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
-    dplyr::summarise(
-      dplyr::across(c(kursregistreringar, deltagare), ~sum(.x, na.rm = TRUE)),
-      .groups = "drop")
+.hogskola_cache <- new.env(parent = emptyenv())
+
+.hogskola_tabell <- function(tabell) {
+  if (is.null(.hogskola_cache[[tabell]])) .hogskola_cache[[tabell]] <- .yh_hamta_tabell(tabell)
+  .hogskola_cache[[tabell]]
 }
 
-hamta_hogskola_aktivitet <- function(force = FALSE) {
-  if (force || is.null(.hogskola_aktivitet_cache$df)) {
-    .hogskola_aktivitet_cache$df <-
-      rensa_hogskola_aktivitet(.yh_hamta_tabell("hogskola_aktivitet"))
-  }
-  .hogskola_aktivitet_cache$df
+# ---- Aktivitet (studenter och kursregistreringar) -------------------------
+rensa_hogskola_aktivitet <- function(rad) {
+  rad |>
+    dplyr::rename(kommkod = regionkod, kommun = region) |>
+    dplyr::mutate(
+      ar      = as.integer(ar),
+      kommkod = as.character(kommkod),
+      hskod   = as.character(hskod),
+      program = dplyr::case_when(
+        granularitet == "Program" & !is.na(lprogben) & lprogben != "" ~ lprogben,
+        granularitet == "Program" & !is.na(lprog) & lprog != ""       ~ lprog,
+        granularitet == "Program"                                     ~ "Fristående kurser",
+        TRUE                                                          ~ hskod_namn
+      ),
+      dplyr::across(c(deltagare, kursregistreringar), as.numeric)
+    )
+}
+
+hamta_hogskola_aktivitet <- function() {
+  if (is.null(.hogskola_cache$aktivitet))
+    .hogskola_cache$aktivitet <- rensa_hogskola_aktivitet(.hogskola_tabell("hogskola_aktivitet"))
+  .hogskola_cache$aktivitet
+}
+
+# Lärosäten att välja mellan i lärosätesperspektivet, störst först.
+hogskola_larosaten <- function() {
+  d <- hamta_hogskola_aktivitet() |>
+    dplyr::filter(granularitet == "Larosate", kommkod == "00")
+  d |>
+    dplyr::filter(ar == max(ar)) |>
+    dplyr::arrange(dplyr::desc(deltagare)) |>
+    dplyr::distinct(hskod, hskod_namn)
 }
 
 # ---- Examina ----------------------------------------------------------------
-.hogskola_examen_cache <- new.env(parent = emptyenv())
-
 rensa_hogskola_examen <- function(rad) {
   rad |>
     dplyr::rename(kommkod = regionkod, kommun = region) |>
     dplyr::mutate(
       ar         = as.integer(ar),
       kommkod    = as.character(kommkod),
-      program    = dplyr::coalesce(unname(.sun_bredast[substr(sun2020inr, 1, 1)]),
-                                   "Okänd"),
-      examenstyp = dplyr::coalesce(unname(.examenstyp[substr(tmgrp, 1, 1)]),
-                                   "Övrig examen")
+      hskod      = as.character(hskod),
+      program    = dplyr::coalesce(unname(.sun_bredast[substr(sun2020inr, 1, 1)]), "Okänd"),
+      examenstyp = dplyr::coalesce(unname(.examenstyp[substr(tmgrp, 1, 1)]), "Övrig examen")
     ) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, examenstyp, program) |>
+    dplyr::group_by(ar, kommkod, kommun, geo_niva, hskod, hskod_namn, examenstyp, program, kon) |>
     dplyr::summarise(antal_examina = sum(antal_examina, na.rm = TRUE), .groups = "drop")
 }
 
-hamta_hogskola_examen <- function(force = FALSE) {
-  if (force || is.null(.hogskola_examen_cache$df)) {
-    .hogskola_examen_cache$df <- rensa_hogskola_examen(.yh_hamta_tabell("hogskola_examen"))
-  }
-  .hogskola_examen_cache$df
+hamta_hogskola_examen <- function() {
+  if (is.null(.hogskola_cache$examen))
+    .hogskola_cache$examen <- rensa_hogskola_examen(.hogskola_tabell("hogskola_examen"))
+  .hogskola_cache$examen
 }
 
 # ---- Etablering ---------------------------------------------------------------
-# Den summerade tabellen har samma kolumner som yh_uppfoljning, så YH:s
-# städning (rensa_yh_etablering) och Riket-serie (yh_etablering_riket)
-# återanvänds rakt av.
-.hogskola_etablering_cache <- new.env(parent = emptyenv())
-
-hamta_hogskola_etablering <- function(force = FALSE) {
-  if (force || is.null(.hogskola_etablering_cache$df)) {
-    rad <- .yh_hamta_tabell("hogskola_etablering")
-    # Nyare tabell har även rader per lärosäte (granularitet "Larosate") -
-    # invånarperspektivet använder bara "Region".
-    if ("granularitet" %in% names(rad)) rad <- dplyr::filter(rad, granularitet == "Region")
-    .hogskola_etablering_cache$df <- rensa_yh_etablering(rad)
+# Samma kolumner som yh_uppfoljning, så YH:s städning (rensa_yh_etablering)
+# och Riket-serie (yh_etablering_riket) återanvänds.
+# hskod = NULL -> invånarperspektivet (Region-raderna), annars riksraderna
+# för det lärosätet (Larosate-raderna).
+hamta_hogskola_etablering <- function(hskod = NULL) {
+  rad <- .hogskola_tabell("hogskola_etablering")
+  if ("granularitet" %in% names(rad)) {
+    rad <- if (is.null(hskod)) {
+      dplyr::filter(rad, granularitet == "Region")
+    } else {
+      dplyr::filter(rad, granularitet == "Larosate", .data$hskod == .env$hskod)
+    }
+  } else if (!is.null(hskod)) {
+    rad <- rad[0, ]
   }
-  .hogskola_etablering_cache$df
+  rensa_yh_etablering(rad)
 }
