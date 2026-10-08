@@ -92,7 +92,11 @@ hamta_hogskola_examen <- function(force = FALSE) {
 
 hamta_hogskola_etablering <- function(force = FALSE) {
   if (force || is.null(.hogskola_etablering_cache$df)) {
-    .hogskola_etablering_cache$df <- rensa_yh_etablering(.yh_hamta_tabell("hogskola_etablering"))
+    rad <- .yh_hamta_tabell("hogskola_etablering")
+    # Nyare tabell har även rader per lärosäte (granularitet "Larosate") -
+    # invånarperspektivet använder bara "Region".
+    if ("granularitet" %in% names(rad)) rad <- dplyr::filter(rad, granularitet == "Region")
+    .hogskola_etablering_cache$df <- rensa_yh_etablering(rad)
   }
   .hogskola_etablering_cache$df
 }
