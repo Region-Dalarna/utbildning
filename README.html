@@ -352,115 +352,131 @@ display: none;
 </div>
 
 
-<div id="utbildning-i-dalarna-shiny-skelett" class="section level1">
-<h1>Utbildning i Dalarna – Shiny-skelett</h1>
-<p>Utbildningsstatistik (Samhällsanalys, Region Dalarna). Startar med
-gymnasiet. Läser gymnasieantagningsdata direkt ur databasen.</p>
+<div id="utbildning-i-dalarna" class="section level1">
+<h1>Utbildning i Dalarna</h1>
+<p>Shiny-app med utbildningsstatistik för Dalarna (Samhällsanalys,
+Region Dalarna): förskola, grundskola, gymnasiet, komvux (inkl. SFI),
+folkhögskola, yrkeshögskola (YH) och högskola. Datan läses direkt ur
+databasen.</p>
 <div id="filstruktur" class="section level2">
 <h2>Filstruktur</h2>
-<pre><code>global.R          library() + delad func_shinyappar.R (körs först)
-ui.R, server.R    rot
+<pre><code>global.R          library(), bl.a. rdshinyappar (uppkopplingar, df_till_sf) – körs först
+ui.R, server.R    flikar (en modul per skolform), Gymnasiet förvald
 R/                laddas AUTOMATISKT av Shiny (&gt;= 1.5.0), bokstavsordning, efter global.R
-  def_geografi.R              kommuner + Gysam-områden
-  func_data.R                 databasläsning (beror på def_geografi)
-  func_diagram.R              diagramhjälpare (ggiraph)
-  func_karta.R                referenskarta över samverkansområden (ggiraph + sf)
-  mod_gymnasiet.R             modul: skolform Gymnasiet
-  mod_skolform_placeholder.R  platshållare för övriga skolformer
-www/              CSS, favicon, logga</code></pre>
+  def_farger.R                färger, läses ur CSS-variablerna i www/
+  def_geografi.R              kommuner + samverkansområden
+  func_data*.R                databasläsning och rensning, en fil per skolform
+                              (func_data.R = gymnasiet + gemensamma hjälpare)
+  func_diagram.R              diagramfunktioner (ggiraph)
+  func_karta.R                referenskarta över kommuner/samverkansområden (sf)
+  mod_*.R                     en modul per skolform
+www/              CSS, favicon, logga, tooltips</code></pre>
 </div>
 <div id="köra-lokalt" class="section level2">
 <h2>Köra lokalt</h2>
-<pre class="r"><code>shiny::runApp(&quot;.&quot;)</code></pre>
-<p>Krav: <code>shiny</code>, <code>shinyWidgets</code>,
-<code>dplyr</code>, <code>tidyr</code>, <code>tibble</code>,
-<code>forcats</code>, <code>readr</code>, <code>ggplot2</code>,
-<code>ggiraph</code>, <code>dbplyr</code>, samt <code>sf</code> (för
-kartan – saknas den visas en liten fallback i stället, appen kraschar
-inte). Lägg <code>logo_liggande_fri_vit.png</code> i
-<code>www/</code>.</p>
+<pre class="r"><code>renv::restore()
+shiny::runApp(&quot;.&quot;)</code></pre>
+<p>Lösenorden till databasanvändarna hanteras av
+<code>rdshinyappar</code>. <code>sf</code> ligger i
+<code>_dependencies.R</code> eftersom <code>rdshinyappar</code> bara har
+det som valfritt beroende.</p>
 </div>
 <div id="struktur-hierarki" class="section level2">
 <h2>Struktur (hierarki)</h2>
 <ul>
-<li><strong>N1 Skolform</strong> – yttre <code>tabsetPanel</code>
-(Gymnasiet, YH, Komvux, Högskola, …)</li>
-<li><strong>N2 Statistikområde</strong> – <code>radioGroupButtons</code>
-(knapprad) i <code>R/mod_gymnasiet.R</code></li>
-<li><strong>N3 Indikator</strong> – <code>radioGroupButtons</code>
-(knappar i 2-kolumnersrutnät) i sidopanelen</li>
+<li><strong>N1 Skolform</strong> – yttre <code>tabsetPanel</code> i
+<code>ui.R</code></li>
+<li><strong>N2 Statistikområde</strong> – knapprad överst i varje
+modul</li>
+<li><strong>N3 Indikator</strong> – knappar i sidopanelen (beskrivningen
+visas som tooltip)</li>
 </ul>
-<p>Klara indikatorer: <em>Platser efter program</em> och <em>Sökande,
-första hand</em> (könsuppdelad).</p>
+<p>Indikatorerna definieras i <code>&lt;skolform&gt;_struktur</code>
+överst i respektive modul.</p>
 </div>
-<div id="kartan" class="section level2">
-<h2>Kartan</h2>
-<p><code>R/func_karta.R</code> ritar Dalarnas kommuner som polygoner
-färgade efter samverkansområde (ingen bakgrundskarta). Visas alltid i
-sidopanelen och markerar vald kommun (kommunläge) eller område
-(samverkansläge). Geometrin hämtas ur geodata-databasen
-(<code>karta.kommun_scb</code>) via
-<code>shiny_uppkoppling_las(&quot;geodata&quot;)</code>, filtreras på länskod 20
-och joinas mot <code>kommun_samverkan</code>. Saknas <code>sf</code>
-eller DB-åtkomst visas en liten fallback-text.</p>
-</div>
-<div id="datakälla" class="section level2">
-<h2>Datakälla</h2>
-<p>Gymnasiedatan läses i <code>hamta_gymnasiedata()</code>
-(<code>R/func_data.R</code>) från
-<code>oppna_data.dkf.gymnasieantagna</code> via
-<code>shiny_uppkoppling_las(&quot;oppna_data&quot;)</code>. Tabellen hämtas en
-gång per R-process och cachas;
-<code>hamta_gymnasiedata(force = TRUE)</code> läser om. Rensningen av de
-icke-syntaktiska kolumnnamnen sker EN gång i
-<code>rensa_gymnasiedata()</code>:</p>
+<div id="datakällor" class="section level2">
+<h2>Datakällor</h2>
 <table>
+<colgroup>
+<col width="21%" />
+<col width="28%" />
+<col width="50%" />
+</colgroup>
 <thead>
 <tr class="header">
-<th>DB-kolumn</th>
-<th>Appens namn</th>
+<th>Flik</th>
+<th>Tabell</th>
+<th>Kommun avser</th>
 </tr>
 </thead>
 <tbody>
 <tr class="odd">
-<td><code>org</code></td>
-<td><code>platser</code></td>
+<td>Förskola</td>
+<td><code>oppna_data.mikro_db.forskola</code></td>
+<td>hemkommun</td>
 </tr>
 <tr class="even">
-<td><code>1a_tot</code></td>
-<td><code>sok_1a</code></td>
+<td>Grundskola</td>
+<td><code>oppna_data.mikro_db.grundskola_slutbetyg</code></td>
+<td>skolans kommun</td>
 </tr>
 <tr class="odd">
-<td><code>1a_kv</code></td>
-<td><code>sok_1a_kv</code></td>
+<td>Gymnasiet</td>
+<td><code>oppna_data.dkf.gymnasieantagna</code> m.fl., etablering i
+<code>sekretess.mikro_db.gymnasiet_uppfoljning_raks</code></td>
+<td>–</td>
 </tr>
 <tr class="even">
-<td><code>1a_män</code></td>
-<td><code>sok_1a_man</code></td>
+<td>Komvux</td>
+<td><code>oppna_data.mikro_db.komvux_sfi_studerande</code></td>
+<td>skolans kommun</td>
 </tr>
 <tr class="odd">
-<td><code>ant_tot</code></td>
-<td><code>antagna</code></td>
+<td>Folkhögskola</td>
+<td><code>oppna_data.mikro_db.folkhogskola_elever</code></td>
+<td>kurskommun</td>
 </tr>
 <tr class="even">
-<td><code>led_pl</code></td>
-<td><code>lediga_platser</code></td>
+<td>YH</td>
+<td><code>oppna_data.mikro_db.yh_studerande</code>,
+<code>yh_genomstromning</code>, <code>yh_uppfoljning</code></td>
+<td>studieort</td>
 </tr>
 <tr class="odd">
-<td><code>merit_medel</code></td>
-<td><code>merit_medel</code></td>
+<td>Högskola</td>
+<td><code>oppna_data.mikro_db.hogskola_aktivitet</code>,
+<code>hogskola_examen</code>, <code>hogskola_etablering</code></td>
+<td>hemkommun</td>
 </tr>
 </tbody>
 </table>
-<p><code>samverkansomrade</code> finns inte i tabellen utan joinas på
-<code>kommkod</code> via <code>kommun_samverkan</code>
-(<code>R/def_geografi.R</code>).</p>
+<p>Tabellerna hämtas en gång per R-process och cachas. Komvux och
+Folkhögskola har en kolumn <code>granularitet</code>: deltagare (unika
+individer) får inte summeras över finare nivåer, så de läses från den
+nivå som motsvarar diagrammet.</p>
 </div>
-<div id="källor" class="section level2">
-<h2>Källor</h2>
-<p>Antagningsindikatorerna anger “Gymnasieantagningen, Dalarnas
-kommunförbund”. Källa sätts per indikator (<code>kalla</code>-fältet i
-<code>gymnasiet_struktur</code>).</p>
+<div id="data-in-i-databasen" class="section level2">
+<h2>Data in i databasen</h2>
+<p>Appen läser bara från databasen. Tabellerna skrivs med separata
+skript utanför det här repot (t.ex. <code>hogskola_etablering</code>,
+som är en summering av den individnära högskoleuppföljningen).</p>
+</div>
+<div id="nedladdning" class="section level2">
+<h2>Nedladdning</h2>
+<p>“Ladda ner aktuellt urval” och “Ladda ner hela datasetet” ger
+Excelfiler. Etableringsdata (Gymnasiet, YH, Högskola) summeras först
+till diagrammens nivå, med medelinkomst bland etablerade. Celler med
+färre än <code>ETABLERING_MIN_ANTAL</code> (5) personer – eller färre
+etablerade med inkomst – får tomma värden, se
+<code>summera_etablering_nedladdning()</code> i
+<code>R/func_data.R</code>.</p>
+</div>
+<div id="kartan" class="section level2">
+<h2>Kartan</h2>
+<p><code>R/func_karta.R</code> ritar Dalarnas kommuner färgade efter
+samverkansområde. Geometrin hämtas ur
+<code>geodata.karta.kommun_scb</code>. Går den inte att läsa visas
+felmeddelandet under kartan och i loggen.</p>
 </div>
 </div>
 
