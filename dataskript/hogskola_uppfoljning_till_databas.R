@@ -10,16 +10,16 @@
 #  skrivs till oppna_data.mikro_db.hogskola_etablering (läses av
 #  R/func_data_hogskola.R).
 #
-#  Körs manuellt, inte av appen. Kräver att lösenordet för
-#  skrivanvändaren finns sparat (shiny_set_password("shiny_skriv")).
+#  Körs manuellt, inte av appen. Skriver med rdpostgres
+#  (postgres_databas_skriv_med_metadata() + uppkoppling_adm()), som övriga
+#  databasskript.
 #
 #  Efteråt: ta bort eller flytta råtabellen från oppna_data (se sist).
 # ============================================================
 
 library(dplyr)
-library(DBI)
-
-library(rdshinyappar)   # shiny_uppkoppling_las()/_skriv()
+library(rdshinyappar)   # shiny_uppkoppling_las()
+library(rdpostgres)     # postgres_databas_skriv_med_metadata(), uppkoppling_adm()
 
 # ---- Inställningar ---------------------------------------------------------
 db_namn      <- "oppna_data"
@@ -88,25 +88,18 @@ message("Rader: ", nrow(ra), " -> ", nrow(hogskola_etablering),
         sum(hogskola_etablering$antal <= 3))
 
 # ---- Skriv till databasen --------------------------------------------------
-# Finns tabellen töms den och fylls på igen (TRUNCATE + append), så att
-# behörigheterna för läsanvändaren (shiny_las) ligger kvar.
 if (skriv_till_db) {
-  con <- shiny_uppkoppling_skriv(db_name = db_namn)
-  if (is.null(con)) stop("Kunde inte koppla upp mot databasen.")
-  id <- DBI::Id(schema = schema, table = maltabell)
-  DBI::dbWithTransaction(con, {
-    if (DBI::dbExistsTable(con, id)) {
-      DBI::dbExecute(con, paste0("TRUNCATE TABLE ", schema, ".", maltabell, ";"))
-      DBI::dbWriteTable(con, id, hogskola_etablering, append = TRUE)
-    } else {
-      DBI::dbWriteTable(con, id, hogskola_etablering)
-      DBI::dbExecute(con, paste0("GRANT SELECT ON ", schema, ".", maltabell, " TO shiny_las;"))
-    }
-  })
+  postgres_databas_skriv_med_metadata(
+    con      = uppkoppling_adm(db_namn),
+    inlas_df = hogskola_etablering,
+    schema   = schema,
+    tabell   = maltabell
+  )
   message(schema, ".", maltabell, ": ", nrow(hogskola_etablering), " rader skrivna.")
 
   # Råtabellen har individnära rader (inkomst per person) och bör inte ligga
-  # i oppna_data. Flytta den till sekretess-databasen och ta sedan bort den här:
+  # i oppna_data. Flytta den till sekretess-databasen och ta sedan bort den:
+  # con <- uppkoppling_adm(db_namn)
   # DBI::dbExecute(con, paste0("DROP TABLE ", schema, ".", kalltabell, ";"))
-  DBI::dbDisconnect(con)
+  # DBI::dbDisconnect(con)
 }
