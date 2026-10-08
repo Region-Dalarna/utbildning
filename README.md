@@ -46,10 +46,9 @@ Indikatorerna definieras i `<skolform>_struktur` överst i respektive modul.
 | YH | `oppna_data.mikro_db.yh_studerande`, `yh_genomstromning`, `yh_uppfoljning` | studieort |
 | Högskola | `oppna_data.mikro_db.hogskola_aktivitet`, `hogskola_examen`, `hogskola_etablering` | hemkommun |
 
-Tabellerna hämtas en gång per R-process och cachas. Folkhögskola (och Komvux
-efter nästa uttag) har en kolumn `granularitet`: deltagare (unika individer) får
-inte summeras över finare nivåer, så de läses från den nivå som motsvarar
-diagrammet.
+Tabellerna hämtas en gång per R-process och cachas. Komvux och Folkhögskola har
+en kolumn `granularitet`: deltagare (unika individer) får inte summeras över
+finare nivåer, så de läses från den nivå som motsvarar diagrammet.
 
 ## Dataskript
 - `dataskript/yh_till_databas.R` – städar SCB:s YH-filer och skriver

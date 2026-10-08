@@ -2,18 +2,16 @@
 #  mod_komvux.R
 #  Shiny-modul för skolformen Komvux (inkl. SFI).
 #
-#  Enklare än mod_yh.R/mod_gymnasiet.R: bara ETT statistikområde
-#  (Kursdeltagande) finns än - ingen etablering/uppföljning för Komvux/SFI
-#  ännu (öppen fråga om hur en kohort ska definieras för kursbaserad
-#  utbildning, se diskussion i chatten).
-#
-#  "program" i diagramfunktionernas mening = Niva (nivåtext), se
-#  func_data_komvux.R. Utbildningstyp (Komvux/SFI) är ett eget filter,
-#  inte en diagramdimension - Komvux och SFI blandas annars ihop i samma
-#  stapel/trend, vilket sällan är vad man vill jämföra.
+#  Två statistikområden:
+#  - Kursdeltagande: per nivå ("program" = nivåtext, se func_data_komvux.R).
+#    Deltagare (vy "kommun_kon") visas som i Grundskola: en stapel per
+#    kommun, könsuppdelat eller totalt, och klick på en stapel väljer kommunen.
+#  - Kurser: de största kurserna (kursbeskrivning), övriga slås ihop.
+#  Utbildningstyp (Komvux/SFI) är ett eget filter, inte en diagramdimension.
 # ============================================================
 
 .KALLA_KOMVUX <- "SCB, Komvux/SFI"
+.KOMVUX_ANTAL_KURSER <- 15
 
 komvux_struktur <- list(
   kursdeltagande = list(
@@ -24,13 +22,14 @@ komvux_struktur <- list(
                              metrik = "kursdeltaganden", metrik_label = "Antal kursdeltaganden",
                              kalla = .KALLA_KOMVUX,
                              beskrivning = "Antal kursregistreringar (en person kan läsa flera kurser samma termin)."),
-      # klar = FALSE: deltagare är unika per termin och nivå och dubbelräknas
-      # när VT/HT och nivåer summeras till helår (se func_data_komvux.R).
-      deltagare = list(label = "Deltagare", klar = FALSE, vy = "dashboard", kon = FALSE,
+      # Unika deltagare från granulariteten ArKon (se func_data_komvux.R).
+      deltagare = list(label = "Deltagare", klar = TRUE, vy = "kommun_kon", kon = FALSE,
                        amne = "Antal komvux-/SFI-deltagare",
                        metrik = "deltagare", metrik_label = "Antal deltagare (unika individer)",
                        kalla = .KALLA_KOMVUX,
-                       beskrivning = "Antal unika individer med minst en kursdeltagande under året och terminen."),
+                       beskrivning = paste(
+                         "Antal unika individer med minst ett kursdeltagande under året.",
+                         "Med Alla utbildningstyper räknas den som läser både Komvux och SFI två gånger.")),
       andel_godkant = list(label = "Andel godkända", klar = TRUE, vy = "andel", kon = FALSE,
                           amne = "Andel godkända kurser", metrik = "andel_godkant", vikt = "avslutad_kurs",
                           metrik_label = "Andel godkända (%)", kalla = .KALLA_KOMVUX,
@@ -41,6 +40,21 @@ komvux_struktur <- list(
                            amne = "Andel avbrott", metrik = "andel_avbrott", vikt = "kursdeltaganden",
                            metrik_label = "Andel avbrott (%)", kalla = .KALLA_KOMVUX,
                            beskrivning = "Andel av samtliga kursdeltaganden som slutat med avbrott.")
+    )
+  ),
+  kurser = list(
+    label = "Kurser",
+    indikatorer = list(
+      kursdeltaganden = list(label = "Kursdeltaganden", klar = TRUE, vy = "dashboard", kon = FALSE,
+                             amne = "Antal kursdeltaganden",
+                             metrik = "kursdeltaganden", metrik_label = "Antal kursdeltaganden",
+                             kalla = .KALLA_KOMVUX,
+                             beskrivning = paste0("De ", .KOMVUX_ANTAL_KURSER, " kurserna med flest ",
+                                                  "kursdeltaganden i valt område. Övriga kurser slås ihop.")),
+      andel_godkant = list(label = "Andel godkända", klar = TRUE, vy = "andel", kon = FALSE,
+                           amne = "Andel godkända kurser", metrik = "andel_godkant", vikt = "avslutad_kurs",
+                           metrik_label = "Andel godkända (%)", kalla = .KALLA_KOMVUX,
+                           beskrivning = "Andel godkänt bland avslutade kursdeltaganden, per kurs.")
     )
   )
 )
@@ -72,7 +86,7 @@ mod_komvux_ui <- function(id) {
           selected = "_alla_"
         ),
         shinyWidgets::pickerInput(
-          inputId = ns("geo_val"), label = "Område",
+          inputId = ns("geo_val"), label = "Område (skolans kommun)",
           choices = c("Hela Dalarna" = "_alla_", geo_val_kommun),
           selected = "_alla_",
           options = shinyWidgets::pickerOptions(liveSearch = TRUE)
@@ -128,7 +142,12 @@ mod_komvux_server <- function(id) {
       )
     })
 
-    aktuell_data <- reactive({ hamta_komvux_data() })
+    aktuell_data <- reactive({
+      if (identical(input$omrade, "kurser")) hamta_komvux_kurser() else hamta_komvux_data()
+    })
+
+    # Vad staplarna visar i aktuellt statistikområde.
+    dim_label <- reactive({ if (identical(input$omrade, "kurser")) "kurs" else "nivå" })
 
     valt_indikator <- reactive({
       req(input$omrade)
@@ -151,7 +170,7 @@ mod_komvux_server <- function(id) {
       ut <- input$utbildningstyp
       if (!is.null(ut) && ut != "_alla_") bitar <- c(bitar, ut)
       txt <- paste(bitar, collapse = " \u00b7 ")
-      if (med_ar) txt <- paste0(txt, " år ", req(input$ar))
+      if (med_ar) txt <- paste0(txt, " \u00b7 år ", req(input$ar))
       txt
     }
 
@@ -162,8 +181,27 @@ mod_komvux_server <- function(id) {
     program_vald <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      if (identical(isolate(valt_vy()), "kommun_kon")) {
+        # Deltagare: klick på en kommunstapel väljer kommunen i filtret.
+        if (length(sel) == 1)
+          shinyWidgets::updatePickerInput(session, "geo_val",
+                                          selected = if (sel == "20") "_alla_" else sel)
+        return()
+      }
       program_vald(if (length(sel) >= 1) sel else NULL)
     }, ignoreNULL = FALSE)
+
+    # Könsuppdelat (förvalt) eller totalt - bara för Deltagare.
+    kon_uppdelat <- reactive({ !identical(input$kon_lage, "total") })
+
+    # Deltagare per område och kön för vald utbildningstyp.
+    deltagare_data <- reactive({ hamta_komvux_deltagare(input$utbildningstyp) })
+    deltagare_bas <- reactive({
+      d  <- deltagare_data()
+      gv <- req(input$geo_val)
+      if (gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
+      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+    })
     observeEvent(input$omrade, { program_vald(NULL) }, ignoreInit = TRUE)
 
     output$ar_ui <- renderUI({
@@ -182,7 +220,24 @@ mod_komvux_server <- function(id) {
       gv <- req(input$geo_val)
       d  <- if (gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
       else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
-      filtrera_utbildningstyp(d, input$utbildningstyp)
+      d  <- filtrera_utbildningstyp(d, input$utbildningstyp)
+
+      # Kurser: behåll de största kurserna (över alla år, så att samma kurser
+      # visas oavsett år) och slå ihop resten.
+      if (identical(input$omrade, "kurser") && nrow(d) > 0) {
+        storst <- d |>
+          dplyr::group_by(program) |>
+          dplyr::summarise(n = sum(kursdeltaganden, na.rm = TRUE), .groups = "drop") |>
+          dplyr::slice_max(n, n = .KOMVUX_ANTAL_KURSER, with_ties = FALSE) |>
+          dplyr::pull(program)
+        d <- d |>
+          dplyr::mutate(program = dplyr::if_else(program %in% storst, program, "Övriga kurser")) |>
+          dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
+          dplyr::summarise(dplyr::across(dplyr::all_of(.komvux_matt), ~sum(.x, na.rm = TRUE)),
+                           .groups = "drop") |>
+          .komvux_andelar()
+      }
+      d
     })
     data_ar <- reactive({
       req(input$ar)
@@ -197,8 +252,23 @@ mod_komvux_server <- function(id) {
     output$vy <- renderUI({
       ind <- valt_indikator()
       if (!isTRUE(ind$klar)) return(div(class = "rd-info", "Den här vyn är inte inlagd än."))
+      if (valt_vy() == "kommun_kon") {
+        return(fluidRow(
+          column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"),
+                 tags$p(class = "rd-hint rd-hint--bar",
+                        "Klicka på en stapel för att se utvecklingen över tid för kommunen."),
+                 div(class = "rd-kon-kontroll",
+                     shinyWidgets::radioGroupButtons(
+                       inputId  = ns("kon_lage"), label = NULL,
+                       choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
+                       selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+                       size = "sm"))),
+          column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
+        ))
+      }
       hint <- tags$p(class = "rd-hint rd-hint--bar",
-                     "Klicka på en stapel i diagrammet för att se statistik för en specifik nivå.")
+                     paste0("Klicka på en stapel i diagrammet för att se statistik för en specifik ",
+                            dim_label(), "."))
       fluidRow(
         column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
@@ -207,23 +277,51 @@ mod_komvux_server <- function(id) {
 
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
+      if (valt_vy() == "kommun_kon") {
+        df <- dplyr::filter(deltagare_data(), ar == as.integer(req(input$ar)),
+                            geo_niva %in% c("lan", "kommun"))
+        validate(need(nrow(df) > 0, "Inga data för valt urval."))
+        ut <- input$utbildningstyp
+        sub <- paste0("Skolans kommun \u00b7 ",
+                      if (!is.null(ut) && ut != "_alla_") ut else "Komvux och SFI",
+                      " \u00b7 år ", input$ar)
+        return(skapa_diagram_andel_omrade_kon(
+          df, ind$metrik, ind$metrik, ind$metrik_label, input$ar,
+          vald_kommkod = input$geo_val, kon_uppdelat = kon_uppdelat(),
+          summa = TRUE, enhet = "",
+          rubrik = paste0(ind$amne, " efter kommun", if (kon_uppdelat()) " och kön" else ""),
+          underrubrik = sub, kalla = ind$kalla))
+      }
       df  <- data_ar()
       validate(need(nrow(df) > 0, "Inga data för valt urval."))
       sub <- filter_underrubrik(med_ar = TRUE)
 
       if (valt_vy() == "andel") {
         skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
-                                rubrik = paste0(ind$amne, " efter nivå"),
+                                rubrik = paste0(ind$amne, " efter ", dim_label()),
                                 underrubrik = sub, kalla = ind$kalla)
       } else {
         skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
-                          rubrik = paste0(ind$amne, " efter nivå"),
+                          rubrik = paste0(ind$amne, " efter ", dim_label()),
                           underrubrik = sub, kalla = ind$kalla)
       }
     })
 
     output$d_trend <- ggiraph::renderGirafe({
       ind  <- valt_indikator(); req(isTRUE(ind$klar))
+      if (valt_vy() == "kommun_kon") {
+        df  <- deltagare_bas()
+        validate(need(nrow(df) > 0, "Inga data."))
+        rub <- paste0(ind$amne, " \u2013 utveckling över tid")
+        sub <- filter_underrubrik()
+        if (kon_uppdelat()) {
+          return(skapa_diagram_trend_andel_kon(df, ind$metrik, ind$metrik, ind$metrik_label,
+                                               rubrik = rub, underrubrik = sub, kalla = ind$kalla,
+                                               enhet = "", summa = TRUE))
+        }
+        return(skapa_diagram_trend(df, ind$metrik, ind$metrik_label, NULL,
+                                   rubrik = rub, underrubrik = sub, kalla = ind$kalla))
+      }
       df   <- data_bas()
       validate(need(nrow(df) > 0, "Inga data."))
       prog <- program_vald()
@@ -241,7 +339,11 @@ mod_komvux_server <- function(id) {
 
     output$ladda_ner <- downloadHandler(
       filename = function() paste0("komvux_", input$omrade, "_", input$indikator, "_", input$ar, ".xlsx"),
-      content  = function(file) skriv_gymnasie_excel(data_ar(), file, blad = "Komvux")
+      content  = function(file) {
+        d <- if (valt_vy() == "kommun_kon")
+          dplyr::filter(deltagare_bas(), ar == as.integer(req(input$ar))) else data_ar()
+        skriv_gymnasie_excel(d, file, blad = "Komvux")
+      }
     )
     output$ladda_ner_alla <- downloadHandler(
       filename = function() "komvux_hela_datasetet.xlsx",
