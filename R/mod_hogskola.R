@@ -442,13 +442,18 @@ mod_hogskola_server <- function(id) {
                           rubrik = rub, underrubrik = sub, kalla = ind$kalla)
     })
 
+    # Etableringsdata laddas ner summerad (se summera_etablering_nedladdning()).
+    nedladdning <- function(d) {
+      if (identical(input$omrade, "etablering")) summera_etablering_nedladdning(d) else d
+    }
+
     output$ladda_ner <- downloadHandler(
       filename = function() paste0("hogskola_", input$omrade, "_", input$indikator, "_", input$ar, ".xlsx"),
-      content  = function(file) skriv_gymnasie_excel(data_ar(), file, blad = "Högskola")
+      content  = function(file) skriv_gymnasie_excel(nedladdning(data_ar()), file, blad = "Högskola")
     )
     output$ladda_ner_alla <- downloadHandler(
       filename = function() "hogskola_hela_datasetet.xlsx",
-      content  = function(file) skriv_gymnasie_excel(aktuell_data(), file, blad = "Högskola")
+      content  = function(file) skriv_gymnasie_excel(nedladdning(aktuell_data()), file, blad = "Högskola")
     )
   })
 }

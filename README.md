@@ -1,66 +1,70 @@
-# Utbildning i Dalarna – Shiny-skelett
+# Utbildning i Dalarna
 
-Utbildningsstatistik (Samhällsanalys, Region Dalarna). Startar med gymnasiet.
-Läser gymnasieantagningsdata direkt ur databasen.
+Shiny-app med utbildningsstatistik för Dalarna (Samhällsanalys, Region Dalarna):
+förskola, grundskola, gymnasiet, komvux (inkl. SFI), folkhögskola,
+yrkeshögskola (YH) och högskola. Datan läses direkt ur databasen.
 
 ## Filstruktur
 ```
-global.R          library() + delad func_shinyappar.R (körs först)
-ui.R, server.R    rot
+global.R          library(), bl.a. rdshinyappar (uppkopplingar, df_till_sf) – körs först
+ui.R, server.R    flikar (en modul per skolform), Gymnasiet förvald
 R/                laddas AUTOMATISKT av Shiny (>= 1.5.0), bokstavsordning, efter global.R
-  def_geografi.R              kommuner + Gysam-områden
-  func_data.R                 databasläsning (beror på def_geografi)
-  func_diagram.R              diagramhjälpare (ggiraph)
-  func_karta.R                referenskarta över samverkansområden (ggiraph + sf)
-  mod_gymnasiet.R             modul: skolform Gymnasiet
-  mod_skolform_placeholder.R  platshållare för övriga skolformer
-www/              CSS, favicon, logga
+  def_farger.R                färger, läses ur CSS-variablerna i www/
+  def_geografi.R              kommuner + samverkansområden
+  func_data*.R                databasläsning och rensning, en fil per skolform
+                              (func_data.R = gymnasiet + gemensamma hjälpare)
+  func_diagram.R              diagramfunktioner (ggiraph)
+  func_karta.R                referenskarta över kommuner/samverkansområden (sf)
+  mod_*.R                     en modul per skolform
+dataskript/       körs manuellt, inte av appen (se nedan)
+www/              CSS, favicon, logga, tooltips
 ```
 
 ## Köra lokalt
 ```r
+renv::restore()
 shiny::runApp(".")
 ```
-Krav: `shiny`, `shinyWidgets`, `dplyr`, `tidyr`, `tibble`, `forcats`,
-`readr`, `ggplot2`, `ggiraph`, `dbplyr`, samt `sf` (för kartan – saknas den
-visas en liten fallback i stället, appen kraschar inte). Lägg
-`logo_liggande_fri_vit.png` i `www/`.
+Lösenorden till databasanvändarna hanteras av `rdshinyappar`. `sf` ligger i
+`_dependencies.R` eftersom `rdshinyappar` bara har det som valfritt beroende.
 
 ## Struktur (hierarki)
-- **N1 Skolform** – yttre `tabsetPanel` (Gymnasiet, YH, Komvux, Högskola, …)
-- **N2 Statistikområde** – `radioGroupButtons` (knapprad) i `R/mod_gymnasiet.R`
-- **N3 Indikator** – `radioGroupButtons` (knappar i 2-kolumnersrutnät) i sidopanelen
+- **N1 Skolform** – yttre `tabsetPanel` i `ui.R`
+- **N2 Statistikområde** – knapprad överst i varje modul
+- **N3 Indikator** – knappar i sidopanelen (beskrivningen visas som tooltip)
 
-Klara indikatorer: *Platser efter program* och *Sökande, första hand* (könsuppdelad).
+Indikatorerna definieras i `<skolform>_struktur` överst i respektive modul.
+
+## Datakällor
+| Flik | Tabell | Kommun avser |
+|------|--------|--------------|
+| Förskola | `oppna_data.mikro_db.forskola` | hemkommun |
+| Grundskola | `oppna_data.mikro_db.grundskola_slutbetyg` | skolans kommun |
+| Gymnasiet | `oppna_data.dkf.gymnasieantagna` m.fl., etablering i `sekretess.mikro_db.gymnasiet_uppfoljning_raks` | – |
+| Komvux | `oppna_data.mikro_db.komvux_sfi_studerande` | skolans kommun |
+| Folkhögskola | `oppna_data.mikro_db.folkhogskola_elever` | kurskommun |
+| YH | `oppna_data.mikro_db.yh_studerande`, `yh_genomstromning`, `yh_uppfoljning` | studieort |
+| Högskola | `oppna_data.mikro_db.hogskola_aktivitet`, `hogskola_examen`, `hogskola_etablering` | hemkommun |
+
+Tabellerna hämtas en gång per R-process och cachas. Folkhögskola (och Komvux
+efter nästa uttag) har en kolumn `granularitet`: deltagare (unika individer) får
+inte summeras över finare nivåer, så de läses från den nivå som motsvarar
+diagrammet.
+
+## Dataskript
+- `dataskript/yh_till_databas.R` – städar SCB:s YH-filer och skriver
+  `yh_studerande`, `yh_genomstromning`, `yh_uppfoljning` och
+  `yh_uppfoljning_arbetsort`.
+- `dataskript/hogskola_uppfoljning_till_databas.R` – summerar den
+  individnära `hogskola_uppfoljning` till `hogskola_etablering`.
+
+## Nedladdning
+"Ladda ner aktuellt urval" och "Ladda ner hela datasetet" ger Excelfiler.
+Etableringsdata (Gymnasiet, YH, Högskola) summeras först till diagrammens nivå,
+utan inkomster, och celler med färre än `ETABLERING_MIN_ANTAL` (5) personer
+får tomma värden – se `summera_etablering_nedladdning()` i `R/func_data.R`.
 
 ## Kartan
-`R/func_karta.R` ritar Dalarnas kommuner som polygoner färgade efter
-samverkansområde (ingen bakgrundskarta). Visas alltid i sidopanelen och
-markerar vald kommun (kommunläge) eller område (samverkansläge). Geometrin
-hämtas ur geodata-databasen (`karta.kommun_scb`) via
-`shiny_uppkoppling_las("geodata")`, filtreras på länskod 20 och joinas mot
-`kommun_samverkan`. Saknas `sf` eller DB-åtkomst visas en liten fallback-text.
-
-## Datakälla
-Gymnasiedatan läses i `hamta_gymnasiedata()` (`R/func_data.R`) från
-`oppna_data.dkf.gymnasieantagna` via `shiny_uppkoppling_las("oppna_data")`.
-Tabellen hämtas en gång per R-process och cachas; `hamta_gymnasiedata(force = TRUE)`
-läser om. Rensningen av de icke-syntaktiska kolumnnamnen sker EN gång i
-`rensa_gymnasiedata()`:
-
-| DB-kolumn   | Appens namn      |
-|-------------|------------------|
-| `org`       | `platser`        |
-| `1a_tot`    | `sok_1a`         |
-| `1a_kv`     | `sok_1a_kv`      |
-| `1a_män`    | `sok_1a_man`     |
-| `ant_tot`   | `antagna`        |
-| `led_pl`    | `lediga_platser` |
-| `merit_medel` | `merit_medel`  |
-
-`samverkansomrade` finns inte i tabellen utan joinas på `kommkod` via
-`kommun_samverkan` (`R/def_geografi.R`).
-
-## Källor
-Antagningsindikatorerna anger "Gymnasieantagningen, Dalarnas kommunförbund".
-Källa sätts per indikator (`kalla`-fältet i `gymnasiet_struktur`).
+`R/func_karta.R` ritar Dalarnas kommuner färgade efter samverkansområde.
+Geometrin hämtas ur `geodata.karta.kommun_scb`. Går den inte att läsa visas
+felmeddelandet under kartan och i loggen.

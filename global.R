@@ -40,4 +40,3 @@ library(rdshinyappar)
 #   R/mod_hogskola.R            modul: skolform Högskola
 #   R/mod_komvux.R              modul: skolform Komvux (inkl. SFI)
 #   R/mod_yh.R                  modul: skolform Yrkeshögskola (YH)
-#   R/mod_skolform_placeholder.R platshållarmodul (används inte just nu)

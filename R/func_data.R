@@ -413,3 +413,31 @@ skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet") {
   openxlsx::freezePane(wb, blad, firstActiveRow = 2)
   openxlsx::saveWorkbook(wb, file, overwrite = TRUE)
 }
+
+# ============================================================
+#  Nedladdning av etableringsdata (Gymnasiet, YH, Högskola)
+# ============================================================
+# Etableringsdatan har rader med en eller ett par personer (och i
+# gymnasiets fall bo-/arbetskommun och inkomst per rad). Nedladdningen
+# summeras därför till samma nivå som diagrammen, utan inkomster, och
+# celler med färre än ETABLERING_MIN_ANTAL personer får tomma värden.
+ETABLERING_MIN_ANTAL <- 5
+
+summera_etablering_nedladdning <- function(df) {
+  grupp <- intersect(c("exam_ar_interval", "uppf_ar_interval", "antal_ar", "geo_niva",
+                       "kommkod", "kommun", "samverkansomrade", "program", "inriktning",
+                       "organisationstyp"), names(df))
+  status <- c("etabl", "syss", "stud", "arblos", "ovriga")
+  df |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(grupp))) |>
+    dplyr::summarise(dplyr::across(dplyr::all_of(c("antal", status)), ~sum(.x, na.rm = TRUE)),
+                     .groups = "drop") |>
+    dplyr::mutate(
+      dplyr::across(dplyr::all_of(status),
+                    ~dplyr::if_else(antal > 0, round(100 * .x / antal, 1), NA_real_),
+                    .names = "andel_{.col}"),
+      dplyr::across(dplyr::all_of(c(status, paste0("andel_", status))),
+                    ~dplyr::if_else(antal < ETABLERING_MIN_ANTAL, NA_real_, as.numeric(.x)))
+    ) |>
+    dplyr::arrange(dplyr::across(dplyr::all_of(grupp)))
+}
