@@ -6,8 +6,7 @@
 #  - hogskola_aktivitet    kursregistreringar/deltagare per lärosäte och program
 #  - hogskola_examen       antal examina per examenstyp och SUN 2020-inriktning
 #  - hogskola_etablering   RAKS-etablering 1/3/5 år efter examen, summerad per
-#                          region och ämnesområde av
-#                          dataskript/hogskola_uppfoljning_till_databas.R
+#                          region och ämnesområde (separat inläsningsskript)
 #                          (samma kolumner som yh_uppfoljning)
 #
 #  regionkod/region är studentens HEMKOMMUN, inte lärosätets ort.

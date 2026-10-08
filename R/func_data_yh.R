@@ -2,7 +2,7 @@
 #  func_data_yh.R
 #  Dataåtkomst för YH-statistik (Yrkeshögskola).
 #
-#  Källor (alla i oppna_data.mikro_db, skrivna av dataskript/yh_till_databas.R):
+#  Källor (alla i oppna_data.mikro_db, skrivna av ett separat inläsningsskript):
 #  - yh_studerande        påbörjade/pågående/examen per år
 #  - yh_genomstromning    andel examen bland avslutade, per startår
 #  - yh_uppfoljning       RAKS-etablering 1/3/5 år efter examen (redan
