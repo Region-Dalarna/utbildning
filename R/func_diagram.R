@@ -215,7 +215,7 @@ skapa_diagram_trend <- function(df, metrik, metrik_label, program_sel = NULL,
                   tooltip = paste0(metrik_label, " ", ar, ": ", antal))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = antal)) +
-    ggplot2::geom_line(color = RD_PRIMARY, linewidth = 0.9) +
+    ggplot2::geom_line(color = RD_PRIMARY, linewidth = 0.9, na.rm = TRUE) +
     ggiraph::geom_point_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4,
       na.rm = TRUE) +
@@ -248,7 +248,7 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
                   tooltip = paste0(kon, " · ", metrik_label, " ", ar, ": ", antal))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = antal, color = kon, group = kon)) +
-    ggplot2::geom_line(linewidth = 0.9) +
+    ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE) +
     ggiraph::geom_point_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = KON_FARGER, name = NULL) +
@@ -672,6 +672,105 @@ skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
     ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, dolda, min_antal)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position    = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+
+  .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
+}
+
+# ---- Staplad fördelning per grupp (t.ex. examenstyp) -------------------------
+# df: en rad per (program, kategori) med antal i metrik. farger: namngiven
+# färgvektor i staplingsordning. Dolda antal (färre än min_antal) blir grå
+# platshållarsegment. Tooltip visar antal och andel av gruppen.
+skapa_diagram_bar_fordelning <- function(df, kategori_kol, metrik, farger, metrik_label,
+                                         ar = NULL, rubrik = NULL, underrubrik = NULL,
+                                         kalla = NULL, min_antal = MIN_ANTAL) {
+  dold_namn <- .dold_fyll_namn(min_antal)
+  d <- df |>
+    dplyr::group_by(program, kategori = .data[[kategori_kol]]) |>
+    dplyr::summarise(antal = sum(.data[[metrik]], na.rm = TRUE), .groups = "drop") |>
+    dplyr::filter(antal > 0, kategori %in% names(farger)) |>
+    dplyr::group_by(program) |>
+    dplyr::mutate(grupp_tot = sum(antal)) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      dold  = .dold(antal, min_antal),
+      varde = dplyr::if_else(dold, ROJ_PLATSHALLARE, antal),
+      fyll  = dplyr::if_else(dold, dold_namn, kategori),
+      kant  = dplyr::if_else(dold, RD_TEXT_MUTED, NA_character_),
+      kategori = factor(kategori, levels = rev(names(farger)))
+    )
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
+  d <- d |>
+    dplyr::group_by(program) |>
+    dplyr::mutate(tot = sum(varde),       # synliga värden, så att dolda inte avslöjas
+                  nagon_dold = any(dold)) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(
+      program = forcats::fct_reorder(program, tot),
+      tooltip = paste0("<b>", program, "</b><br/>", kategori, " \u00b7 ",
+                       .metrik_ar(metrik_label, ar), ": ",
+                       # Andel bara när inget i stapeln är dolt - annars kunde det
+                       # dolda värdet räknas ut ur totalen.
+                       dplyr::case_when(
+                         dold       ~ .dold_text(min_antal),
+                         nagon_dold ~ as.character(antal),
+                         TRUE       ~ paste0(antal, " (", scales::number(100 * antal / grupp_tot,
+                                                                         accuracy = 0.1), " %)"))),
+      data_id = as.character(program))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program, fill = fyll, group = kategori)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = data_id, colour = kant),
+      width = 0.72, linetype = "22", linewidth = 0.35) +
+    ggplot2::scale_fill_manual(values = c(farger, stats::setNames(RD_DOLD_FYLL, dold_namn)),
+                               breaks = c(names(farger), if (any(d$dold)) dold_namn),
+                               name = NULL) +
+    ggplot2::scale_colour_identity() +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
+    ggplot2::labs(x = metrik_label, y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top") +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE))
+
+  .girafe_std(g, width_svg = 6.8, height_svg = max(4, dplyr::n_distinct(d$program) * 0.35 + 2),
+              selection = TRUE)
+}
+
+# ---- Trend: valt område jämfört med Dalarna och riket ----------------------
+# d: en rad per (ar, serie) med varde och underlag. serie i önskad ordning
+# (faktor), t.ex. "Falun", "Dalarna", "Riket". Värden vars underlag är under
+# min_antal blir avbrott i linjen.
+skapa_diagram_trend_jmf <- function(d, metrik_label, rubrik = NULL, underrubrik = NULL,
+                                    kalla = NULL, enhet = " %", min_antal = MIN_ANTAL,
+                                    decimaler = 0.1) {
+  dolda <- any(.dold(d$underlag, min_antal) & !is.na(d$varde))
+  d <- d |>
+    dplyr::mutate(
+      varde   = dplyr::if_else(.dold(underlag, min_antal), NA_real_, varde),
+      tooltip = paste0(serie, " ", ar, ": ", scales::number(varde, accuracy = decimaler), enhet))
+  if (all(is.na(d$varde))) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+
+  serier <- levels(factor(d$serie))
+  farger <- stats::setNames(rep(RD_PRIMARY, length(serier)), serier)
+  farger[serier == "Dalarna"] <- if (length(serier) > 2) RD_ACCENT else RD_PRIMARY
+  farger[serier == "Riket"]   <- RD_TEXT_MUTED
+  linjer <- stats::setNames(ifelse(serier == "Riket", "dashed", "solid"), serier)
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = varde, color = serie, group = serie,
+                                       linetype = serie)) +
+    ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE) +
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.2, na.rm = TRUE) +
+    ggplot2::scale_color_manual(values = farger, name = NULL) +
+    ggplot2::scale_linetype_manual(values = linjer, guide = "none") +
+    ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
+    ggplot2::labs(x = NULL, y = NULL, title = rubrik, subtitle = underrubrik,
                   caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(legend.position    = "top",

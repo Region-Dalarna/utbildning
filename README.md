@@ -39,7 +39,7 @@ Indikatorerna definieras i `<skolform>_struktur` överst i respektive modul.
 |------|--------|--------------|
 | Förskola | `oppna_data.mikro_db.forskola` | hemkommun |
 | Grundskola | `oppna_data.mikro_db.grundskola_slutbetyg` | skolans kommun |
-| Gymnasiet | `oppna_data.dkf.gymnasieantagna` m.fl., etablering i `sekretess.mikro_db.gymnasiet_uppfoljning_raks` | – |
+| Gymnasiet | `oppna_data.dkf.gymnasieantagna` m.fl., avgångna i `oppna_data.mikro_db.gymnasiet_avgangna` (skolkommun eller bokommun), etablering i `sekretess.mikro_db.gymnasiet_uppfoljning_raks` | – |
 | Komvux | `oppna_data.mikro_db.komvux_sfi_studerande` | skolans kommun |
 | Folkhögskola | `oppna_data.mikro_db.folkhogskola_elever` | kurskommun |
 | YH | `oppna_data.mikro_db.yh_studerande`, `yh_genomstromning`, `yh_uppfoljning` | studieort |

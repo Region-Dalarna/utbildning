@@ -170,11 +170,21 @@ mod_gymnasiet_ui <- function(id) {
       class = "rd-segmented",
       shinyWidgets::radioGroupButtons(
         inputId  = ns("omrade"), label = NULL,
-        choices  = .choices_fran_lista(gymnasiet_struktur),
+        # Avgångna (egen modul, mod_gymnasiet_avgangna.R) före Etablering.
+        choices  = append(.choices_fran_lista(gymnasiet_struktur),
+                          c("Avgångna" = "avgangna"),
+                          after = which(names(gymnasiet_struktur) == "resultat")),
         selected = names(gymnasiet_struktur)[1]
       )
     ),
 
+    conditionalPanel(
+      condition = "input.omrade == 'avgangna'", ns = ns,
+      mod_gymnasiet_avgangna_ui(ns("avg"))
+    ),
+
+    conditionalPanel(
+      condition = "input.omrade != 'avgangna'", ns = ns,
     sidebarLayout(
       sidebarPanel(
         width = 3, class = "rd-sidebar",
@@ -218,12 +228,16 @@ mod_gymnasiet_ui <- function(id) {
         )
       )
     )
+    )
   )
 }
 
 # ---- Server ----------------------------------------------------------------
 mod_gymnasiet_server <- function(id) {
   moduleServer(id, function(input, output, session) {
+    # Statistikområdet Avgångna har en egen modul (mod_gymnasiet_avgangna.R).
+    mod_gymnasiet_avgangna_server("avg")
+
     ns <- session$ns
 
     output$indikator_ui <- renderUI({
