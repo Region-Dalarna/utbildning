@@ -26,9 +26,28 @@
 KALLA_RUD <- "Regionala utvecklingsdatabasen (SCB)"
 kalla_rud <- function(tabell) paste0(KALLA_RUD, ", ", tabell)
 
+# ---- Röjandekontroll -----------------------------------------------------
+# Värden som bygger på färre än min_antal personer visas inte (MIN_ANTAL i
+# func_data.R). Antal döljs när de är 1 till min_antal - 1, andelar och
+# medelvärden när deras underlag är under min_antal. min_antal = 0 stänger
+# av kontrollen (publicerad statistik).
+.dold <- function(n, min_antal) !is.na(n) & n > 0 & n < min_antal
+.dold_text <- function(min_antal) paste("färre än", min_antal)
+
+# Etikett "färre än 5" vid nollan för dolda staplar (liggande diagram).
+.dold_etikett <- function(d, y, min_antal) {
+  ggplot2::geom_text(data = d, ggplot2::aes(x = 0, y = .data[[y]]),
+                     label = .dold_text(min_antal), hjust = -0.08, size = 2.7,
+                     color = RD_TEXT_MUTED, inherit.aes = FALSE)
+}
+
 # Källtext -> caption (med "Källa: "-prefix). NULL ger ingen caption.
-.kalltext <- function(kalla) {
-  if (is.null(kalla) || !nzchar(kalla)) NULL else paste0("Källa: ", kalla)
+# dolda = TRUE lägger till en rad om att värden har dolts.
+.kalltext <- function(kalla, dolda = FALSE, min_antal = MIN_ANTAL) {
+  k <- if (is.null(kalla) || !nzchar(kalla)) NULL else paste0("Källa: ", kalla)
+  if (!isTRUE(dolda)) return(k)
+  paste(c(k, paste0("Värden som bygger på ", .dold_text(min_antal), " personer visas inte.")),
+        collapse = "\n")
 }
 
 # Kortare etiketter för programtypslegenden (lång text klipps annars).
@@ -90,77 +109,101 @@ kalla_rud <- function(tabell) paste0(KALLA_RUD, ", ", tabell)
 
 # ---- Stapel: total metrik efter program (klickbar) ------------------------
 skapa_diagram_bar <- function(df, metrik, metrik_label, ar = NULL,
-                              rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                              rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                              min_antal = MIN_ANTAL) {
   d <- df |>
     dplyr::group_by(program) |>
     dplyr::summarise(antal = sum(.data[[metrik]], na.rm = TRUE), .groups = "drop") |>
     dplyr::filter(antal > 0) |>
     dplyr::mutate(
-      program = forcats::fct_reorder(program, antal),
-      tooltip = paste0("<b>", program, "</b><br/>", .metrik_ar(metrik_label, ar), ": ", antal),
+      dold    = .dold(antal, min_antal),
+      varde   = dplyr::if_else(dold, 0, antal),
+      # Sortera på det synliga värdet, så att dolda inte avslöjas av ordningen.
+      program = forcats::fct_reorder(program, varde),
+      tooltip = paste0("<b>", program, "</b><br/>", .metrik_ar(metrik_label, ar), ": ",
+                       dplyr::if_else(dold, .dold_text(min_antal), as.character(antal))),
       data_id = as.character(program)
     )
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = antal, y = program)) +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id),
       fill = RD_PRIMARY, width = 0.74) +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema()
+  if (any(d$dold)) g <- g + .dold_etikett(dplyr::filter(d, dold), "program", min_antal)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
 
 # ---- Stapel: könsuppdelad (staplad), klickbar väljer programmet -----------
 skapa_diagram_bar_kon <- function(df, metrik_kv, metrik_man, metrik_label, ar = NULL,
-                                  rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                  rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                  min_antal = MIN_ANTAL) {
   d <- df |>
     dplyr::group_by(program) |>
     dplyr::summarise(
       Kvinnor = sum(.data[[metrik_kv]],  na.rm = TRUE),
       `Män`   = sum(.data[[metrik_man]], na.rm = TRUE),
       .groups = "drop") |>
-    dplyr::mutate(tot = Kvinnor + `Män`) |>
-    dplyr::filter(tot > 0) |>
+    dplyr::filter(Kvinnor + `Män` > 0) |>
     tidyr::pivot_longer(c(Kvinnor, `Män`), names_to = "kon", values_to = "antal") |>
+    dplyr::mutate(dold = .dold(antal, min_antal),
+                  varde = dplyr::if_else(dold, 0, antal)) |>
+    dplyr::group_by(program) |>
+    # Sortera på det synliga värdet, så att dolda inte avslöjas av ordningen.
+    dplyr::mutate(tot = sum(varde), alla_dolda = all(dold | antal == 0)) |>
+    dplyr::ungroup() |>
     dplyr::mutate(
       program = forcats::fct_reorder(program, tot),
       tooltip = paste0("<b>", program, "</b><br/>", kon, " · ",
-                       .metrik_ar(metrik_label, ar), ": ", antal),
+                       .metrik_ar(metrik_label, ar), ": ",
+                       dplyr::if_else(dold, .dold_text(min_antal), as.character(antal))),
       data_id = as.character(program))
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = antal, y = program, fill = kon)) +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program, fill = kon)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id), width = 0.72) +
     ggplot2::scale_fill_manual(values = KON_FARGER, name = NULL) +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top")
+  if (any(d$alla_dolda))
+    g <- g + .dold_etikett(dplyr::distinct(dplyr::filter(d, alla_dolda), program), "program", min_antal)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
 
 # ---- Linje: utveckling över tid -------------------------------------------
 skapa_diagram_trend <- function(df, metrik, metrik_label, program_sel = NULL,
-                                rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                min_antal = MIN_ANTAL) {
   if (!is.null(program_sel)) df <- dplyr::filter(df, program == program_sel)
 
   d <- df |>
     dplyr::group_by(ar) |>
-    dplyr::summarise(antal = sum(.data[[metrik]], na.rm = TRUE), .groups = "drop") |>
-    dplyr::mutate(tooltip = paste0(metrik_label, " ", ar, ": ", antal))
+    dplyr::summarise(antal = sum(.data[[metrik]], na.rm = TRUE), .groups = "drop")
+  dolda <- any(.dold(d$antal, min_antal))
+  # Dolda punkter blir NA - linjen får ett avbrott där.
+  d <- d |>
+    dplyr::mutate(antal = dplyr::if_else(.dold(antal, min_antal), NA_real_, as.numeric(antal)),
+                  tooltip = paste0(metrik_label, " ", ar, ": ", antal))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = antal)) +
     ggplot2::geom_line(color = RD_PRIMARY, linewidth = 0.9) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4) +
+      ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4,
+      na.rm = TRUE) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
     ggplot2::labs(x = NULL, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
 
@@ -169,7 +212,8 @@ skapa_diagram_trend <- function(df, metrik, metrik_label, program_sel = NULL,
 
 # ---- Linje: utveckling över tid, könsuppdelad (två linjer) ----------------
 skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, program_sel = NULL,
-                                    rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                    rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                    min_antal = MIN_ANTAL) {
   if (!is.null(program_sel)) df <- dplyr::filter(df, program == program_sel)
 
   d <- df |>
@@ -178,17 +222,21 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
       Kvinnor = sum(.data[[metrik_kv]],  na.rm = TRUE),
       `Män`   = sum(.data[[metrik_man]], na.rm = TRUE),
       .groups = "drop") |>
-    tidyr::pivot_longer(c(Kvinnor, `Män`), names_to = "kon", values_to = "antal") |>
-    dplyr::mutate(tooltip = paste0(kon, " · ", metrik_label, " ", ar, ": ", antal))
+    tidyr::pivot_longer(c(Kvinnor, `Män`), names_to = "kon", values_to = "antal")
+  dolda <- any(.dold(d$antal, min_antal))
+  d <- d |>
+    dplyr::mutate(antal = dplyr::if_else(.dold(antal, min_antal), NA_real_, as.numeric(antal)),
+                  tooltip = paste0(kon, " · ", metrik_label, " ", ar, ": ", antal))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = antal, color = kon, group = kon)) +
     ggplot2::geom_line(linewidth = 0.9) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2) +
+      ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = KON_FARGER, name = NULL) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
     ggplot2::labs(x = NULL, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(
       legend.position    = "top",
@@ -378,7 +426,7 @@ skapa_diagram_trend_arskurs <- function(df, program_sel = NULL,
 # alla viktade medelvärden (t.ex. meritvärde) - enhet styr suffixet.
 skapa_diagram_bar_andel <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
                                     rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                    enhet = " %") {
+                                    enhet = " %", min_antal = MIN_ANTAL) {
   d <- df |>
     dplyr::group_by(program) |>
     dplyr::summarise(
@@ -389,19 +437,24 @@ skapa_diagram_bar_andel <- function(df, andel_kol, vikt_kol, metrik_label, ar = 
       .groups = "drop") |>
     dplyr::filter(!is.na(andel), vikt > 0) |>
     dplyr::mutate(
-      program = forcats::fct_reorder(program, andel),
+      dold    = .dold(vikt, min_antal),            # för litet underlag
+      varde   = dplyr::if_else(dold, 0, andel),
+      program = forcats::fct_reorder(program, varde),
       tooltip = paste0("<b>", program, "</b><br/>", .metrik_ar(metrik_label, ar), ": ",
-                       scales::number(andel, accuracy = 0.1), enhet),
+                       dplyr::if_else(dold, .dold_text(min_antal),
+                                      paste0(scales::number(andel, accuracy = 0.1), enhet))),
       data_id = as.character(program))
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = program)) +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id), fill = RD_PRIMARY, width = 0.74) +
     ggplot2::scale_x_continuous(labels = function(x) paste0(x, enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema()
+  if (any(d$dold)) g <- g + .dold_etikett(dplyr::filter(d, dold), "program", min_antal)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
@@ -409,7 +462,7 @@ skapa_diagram_bar_andel <- function(df, andel_kol, vikt_kol, metrik_label, ar = 
 # ---- Viktad andel (%) över tid – linje ------------------------------------
 skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, program_sel = NULL,
                                       rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                      enhet = " %") {
+                                      enhet = " %", min_antal = MIN_ANTAL) {
   if (!is.null(program_sel)) df <- dplyr::filter(df, program == program_sel)
 
   d <- df |>
@@ -419,19 +472,24 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
       andel = ifelse(vikt > 0,
                      sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
                      NA_real_),
-      .groups = "drop") |>
-    dplyr::filter(!is.na(andel)) |>
-    dplyr::mutate(tooltip = paste0(metrik_label, " ", ar, ": ",
+      .groups = "drop")
+  dolda <- any(.dold(d$vikt, min_antal) & !is.na(d$andel))
+  # Dolda år blir NA - linjen får ett avbrott där.
+  d <- d |>
+    dplyr::mutate(andel = dplyr::if_else(.dold(vikt, min_antal), NA_real_, andel),
+                  tooltip = paste0(metrik_label, " ", ar, ": ",
                                    scales::number(andel, accuracy = 0.1), enhet))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel)) +
-    ggplot2::geom_line(color = RD_PRIMARY, linewidth = 0.9) +
+    ggplot2::geom_line(color = RD_PRIMARY, linewidth = 0.9, na.rm = TRUE) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4) +
+      ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4,
+      na.rm = TRUE) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
     ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
     ggplot2::labs(x = NULL, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
 
@@ -451,7 +509,8 @@ skapa_diagram_trend_andel <- function(df, andel_kol, vikt_kol, metrik_label, pro
 skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label, ar = NULL,
                                            vald_kommkod = NULL, kon_uppdelat = TRUE,
                                            rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                           enhet = " %", summa = FALSE, grupp_farger = NULL) {
+                                           enhet = " %", summa = FALSE, grupp_farger = NULL,
+                                           min_antal = MIN_ANTAL) {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
   egna_grupper <- !is.null(grupp_farger)
   visa_grupp   <- egna_grupper || kon_uppdelat
@@ -469,7 +528,10 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
                           sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
                           NA_real_),
       .groups = "drop") |>
-    dplyr::filter(!is.na(andel))
+    dplyr::filter(!is.na(andel)) |>
+    # Röjandekontroll: antal (summa) eller underlag (vikt) under min_antal.
+    dplyr::mutate(dold  = if (summa) .dold(andel, min_antal) else .dold(vikt, min_antal),
+                  varde = dplyr::if_else(dold, 0, andel))
 
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
 
@@ -487,7 +549,9 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
   ordning <- d |>
     dplyr::filter(omrade != "Hela Dalarna") |>
     dplyr::group_by(omrade) |>
-    dplyr::summarise(tot = if (summa) sum(andel) else sum(andel * vikt) / sum(vikt),
+    # Synliga värden, så att dolda inte avslöjas av ordningen.
+    dplyr::summarise(tot = if (summa) sum(varde)
+                           else if (any(!dold)) sum((varde * vikt)[!dold]) / sum(vikt[!dold]) else 0,
                      .groups = "drop") |>
     dplyr::arrange(tot) |>
     dplyr::pull(omrade)
@@ -504,11 +568,12 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
       tooltip = paste0("<b>", omrade, "</b><br/>",
                        if (visa_grupp) paste0(kon, " \u00b7 ") else "",
                        .metrik_ar(metrik_label, ar), ": ",
-                       scales::number(andel, accuracy = if (summa) 1 else 0.1,
-                                      big.mark = " "), enhet),
+                       dplyr::if_else(dold, .dold_text(min_antal),
+                                      paste0(scales::number(andel, accuracy = if (summa) 1 else 0.1,
+                                                            big.mark = " "), enhet))),
       data_id = kommkod)
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = omrade, fill = kon)) +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = omrade, fill = kon)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id, alpha = alfa),
       # reverse = TRUE: första gruppen överst i varje rad, samma ordning som legenden
@@ -522,9 +587,14 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
     ggplot2::scale_x_continuous(labels = function(x) paste0(scales::number(x, big.mark = " "), enhet),
                                 expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = metrik_label, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top")
+  # Etikett när hela raden (alla grupper) är dold.
+  helt_dolda <- d |> dplyr::group_by(omrade) |> dplyr::filter(all(dold)) |>
+    dplyr::ungroup() |> dplyr::distinct(omrade)
+  if (nrow(helt_dolda) > 0) g <- g + .dold_etikett(helt_dolda, "omrade", min_antal)
 
   .girafe_std(g, width_svg = 7, height_svg = 9, selection = TRUE)
 }
@@ -536,7 +606,8 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
 # skapa_diagram_andel_omrade_kon()).
 skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
                                           rubrik = NULL, underrubrik = NULL, kalla = NULL,
-                                          enhet = " %", summa = FALSE, grupp_farger = NULL) {
+                                          enhet = " %", summa = FALSE, grupp_farger = NULL,
+                                          min_antal = MIN_ANTAL) {
   kon_etikett <- c("Kvinna" = "Kvinnor", "Man" = "Män")
   farger <- if (is.null(grupp_farger)) KON_FARGER else grupp_farger
   d <- df |>
@@ -551,7 +622,12 @@ skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
                           sum(.data[[andel_kol]] * .data[[vikt_kol]], na.rm = TRUE) / vikt,
                           NA_real_),
       .groups = "drop") |>
-    dplyr::filter(!is.na(andel)) |>
+    dplyr::filter(!is.na(andel))
+  # Röjandekontroll: dolda punkter blir NA - linjen får ett avbrott där.
+  dold  <- if (summa) .dold(d$andel, min_antal) else .dold(d$vikt, min_antal)
+  dolda <- any(dold)
+  d$andel[dold] <- NA_real_
+  d <- d |>
     dplyr::mutate(tooltip = paste0(kon, " \u00b7 ", metrik_label, " ", ar, ": ",
                                    scales::number(andel, accuracy = if (summa) 1 else 0.1,
                                                   big.mark = " "), enhet))
@@ -559,14 +635,15 @@ skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel, color = kon, group = kon)) +
-    ggplot2::geom_line(linewidth = 0.9) +
+    ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2) +
+      ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = farger, name = NULL) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
     ggplot2::scale_y_continuous(labels = function(x) paste0(x, enhet)) +
     ggplot2::labs(x = NULL, y = NULL,
-                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(legend.position    = "top",
                    panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
@@ -582,16 +659,24 @@ skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
 # (kommunrader summerade), df_riket är rikets rad (geo_niva == "riket").
 # program_sel = NULL -> alla program sammanslagen (viktat medel med antal
 # elever är okänt -> enkelt medel per år, ange i underrubrik).
+# Röjandekontroll när datan har ett underlag (kolumnen avslutade, YH);
+# gymnasiets genomströmning (Skolverket) saknar den och visas som den är.
 skapa_diagram_genomstromning_trend <- function(df_dalarna, df_riket,
                                                program_sel = NULL,
                                                rubrik = NULL,
                                                underrubrik = NULL,
-                                               kalla = NULL) {
+                                               kalla = NULL,
+                                               min_antal = MIN_ANTAL) {
+  if (!"avslutade" %in% names(df_dalarna)) df_dalarna$avslutade <- NA_real_
   # Dalarna: medel per år (datan är redan en andel per program/kommunkombination).
   d_dal <- df_dalarna |>
     dplyr::group_by(ar) |>
-    dplyr::summarise(andel = mean(andel, na.rm = TRUE), .groups = "drop") |>
-    dplyr::mutate(serie = "Dalarna",
+    dplyr::summarise(andel = mean(andel, na.rm = TRUE),
+                     underlag = sum(avslutade, na.rm = TRUE), .groups = "drop")
+  dolda <- any(.dold(d_dal$underlag, min_antal))
+  d_dal <- d_dal |>
+    dplyr::mutate(andel = dplyr::if_else(.dold(underlag, min_antal), NA_real_, andel),
+                  serie = "Dalarna",
                   tooltip = paste0("Dalarna ", ar, ": ",
                                    scales::number(andel, accuracy = 0.1), " %"))
 
@@ -601,25 +686,24 @@ skapa_diagram_genomstromning_trend <- function(df_dalarna, df_riket,
                   tooltip = paste0("Riket ", ar, ": ",
                                    scales::number(andel, accuracy = 0.1), " %"))
 
-  d <- dplyr::bind_rows(d_dal, d_rik) |>
-    dplyr::filter(!is.na(andel))
+  d <- dplyr::bind_rows(d_dal, d_rik)
 
-  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3))
+  if (all(is.na(d$andel))) return(.girafe_std(.tom_plot("Inga data"), 5, 3))
 
   serie_farger <- c("Dalarna" = RD_PRIMARY, "Riket" = RD_TEXT_MUTED)
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel,
                                        color = serie, group = serie)) +
-    ggplot2::geom_line(linewidth = 0.9) +
+    ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.4) +
+      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.4, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = serie_farger, name = NULL) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
     ggplot2::scale_y_continuous(labels = function(x) paste0(x, " %"),
                                 limits = c(0, NA)) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla)) +
+                  caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(legend.position  = "top",
                    panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
@@ -631,19 +715,25 @@ skapa_diagram_genomstromning_trend <- function(df_dalarna, df_riket,
 skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
                                              rubrik = NULL,
                                              underrubrik = NULL,
-                                             kalla = NULL) {
+                                             kalla = NULL,
+                                             min_antal = MIN_ANTAL) {
+  if (!"avslutade" %in% names(df)) df$avslutade <- NA_real_
   d <- df |>
     dplyr::group_by(program) |>
-    dplyr::summarise(andel = mean(andel, na.rm = TRUE), .groups = "drop") |>
+    dplyr::summarise(andel = mean(andel, na.rm = TRUE),
+                     underlag = sum(avslutade, na.rm = TRUE), .groups = "drop") |>
     dplyr::filter(!is.na(andel)) |>
     dplyr::mutate(
-      program = forcats::fct_reorder(program, andel),
+      dold    = .dold(underlag, min_antal),
+      varde   = dplyr::if_else(dold, 0, andel),
+      program = forcats::fct_reorder(program, varde),
       tooltip = paste0("<b>", program, "</b><br/>",
                        .metrik_ar("Andel med examen", ar), ": ",
-                       scales::number(andel, accuracy = 0.1), " %"),
+                       dplyr::if_else(dold, .dold_text(min_antal),
+                                      paste0(scales::number(andel, accuracy = 0.1), " %"))),
       data_id = as.character(program))
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = program)) +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id),
       fill = RD_PRIMARY, width = 0.74) +
@@ -652,8 +742,9 @@ skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
       expand = ggplot2::expansion(mult = c(0, 0.04))) +
     ggplot2::labs(x = "Andel med examen (%)", y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla)) +
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema()
+  if (any(d$dold)) g <- g + .dold_etikett(dplyr::filter(d, dold), "program", min_antal)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
@@ -678,7 +769,7 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
                                          antal_ar_val = 3,
                                          riket_andel = NULL,
                                          rubrik = NULL, underrubrik = NULL,
-                                         kalla = NULL) {
+                                         kalla = NULL, min_antal = MIN_ANTAL) {
 
   # ---- Läge: alla uppföljningsår som grupperade staplar -------------------
   if (identical(as.character(antal_ar_val), "alla")) {
@@ -691,14 +782,16 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
                        .groups = "drop") |>
       dplyr::mutate(andel = dplyr::if_else(antal_sum > 0,
                                            status_sum / antal_sum, NA_real_)) |>
-      dplyr::filter(!is.na(andel))
+      dplyr::filter(!is.na(andel)) |>
+      dplyr::mutate(dold  = .dold(antal_sum, min_antal),
+                    varde = dplyr::if_else(dold, 0, andel))
 
     if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
 
-    # Sortera program på medel över alla år
+    # Sortera program på medel över alla år (synliga värden)
     namn_order <- d |>
       dplyr::group_by(namn) |>
-      dplyr::summarise(m = mean(andel, na.rm = TRUE), .groups = "drop") |>
+      dplyr::summarise(m = mean(varde, na.rm = TRUE), .groups = "drop") |>
       dplyr::arrange(m) |>
       dplyr::pull(namn)
 
@@ -707,9 +800,10 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
         namn       = factor(namn, levels = namn_order),
         ar_etikett = factor(ar_etikett, levels = c("1 år", "3 år", "5 år", "7 år")),
         tooltip    = paste0("<b>", namn, "</b><br/>", ar_etikett, ": ",
-                            scales::percent(andel, accuracy = 0.1)))
+                            dplyr::if_else(dold, .dold_text(min_antal),
+                                           scales::percent(andel, accuracy = 0.1))))
 
-    g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = namn, fill = ar_etikett)) +
+    g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = namn, fill = ar_etikett)) +
       ggiraph::geom_col_interactive(
         ggplot2::aes(tooltip = tooltip, data_id = paste(namn, ar_etikett)),
         position = ggplot2::position_dodge(width = 0.8), width = 0.72) +
@@ -719,9 +813,12 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
         expand = ggplot2::expansion(mult = c(0, 0.04)), limits = c(0, 1)) +
       ggplot2::labs(x = metrik_label, y = NULL,
                     title = rubrik, subtitle = underrubrik,
-                    caption = .kalltext(kalla)) +
+                    caption = .kalltext(kalla, any(d$dold), min_antal)) +
       .rd_tema() +
       ggplot2::theme(legend.position = "top")
+    helt_dolda <- d |> dplyr::group_by(namn) |> dplyr::filter(all(dold)) |>
+      dplyr::ungroup() |> dplyr::distinct(namn)
+    if (nrow(helt_dolda) > 0) g <- g + .dold_etikett(helt_dolda, "namn", min_antal)
 
     return(.girafe_std(g, width_svg = 11,
                        height_svg = max(6.5, dplyr::n_distinct(d$namn) * 0.6 + 1.5),
@@ -737,31 +834,35 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
                      .groups = "drop") |>
     dplyr::mutate(andel = dplyr::if_else(antal_sum > 0,
                                          status_sum / antal_sum, NA_real_)) |>
-    dplyr::filter(!is.na(andel))
+    dplyr::filter(!is.na(andel)) |>
+    dplyr::mutate(dold  = .dold(antal_sum, min_antal),
+                  varde = dplyr::if_else(dold, 0, andel))
 
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
 
   # Sortera på andel, men håll inriktningar grupperade under sitt program.
-  # program == namn när vi visar på programnivå.
+  # program == namn när vi visar på programnivå. Bara synliga värden räknas.
   prog_order <- d |>
     dplyr::group_by(program) |>
-    dplyr::summarise(prog_andel = sum(status_sum) / sum(antal_sum), .groups = "drop") |>
+    dplyr::summarise(prog_andel = if (any(!dold)) sum(status_sum[!dold]) / sum(antal_sum[!dold]) else 0,
+                     .groups = "drop") |>
     dplyr::arrange(prog_andel) |>
     dplyr::pull(program)
 
   d <- d |>
     dplyr::mutate(
       program = factor(program, levels = prog_order),
-      namn    = forcats::fct_reorder2(namn, program, andel,
+      namn    = forcats::fct_reorder2(namn, program, varde,
                                       .fun = function(p, a) as.integer(p) + a * 0.01)
     ) |>
     dplyr::mutate(
       tooltip = paste0("<b>", namn, "</b><br/>",
                        antal_ar_val, " år efter examen: ",
-                       scales::percent(andel, accuracy = 0.1))
+                       dplyr::if_else(dold, .dold_text(min_antal),
+                                      scales::percent(andel, accuracy = 0.1)))
     )
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = namn)) +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = namn)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = as.character(namn)),
       fill = RD_PRIMARY, width = 0.74) +
@@ -771,8 +872,9 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
       limits = c(0, 1)) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla)) +
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema()
+  if (any(d$dold)) g <- g + .dold_etikett(dplyr::filter(d, dold), "namn", min_antal)
 
   # Riket-referenslinje (streckad) om tillgänglig
   if (!is.null(riket_andel) && !is.na(riket_andel)) {
@@ -794,7 +896,7 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
                                            metrik, metrik_label,
                                            antal_ar_val = 3,
                                            rubrik = NULL, underrubrik = NULL,
-                                           kalla = NULL) {
+                                           kalla = NULL, min_antal = MIN_ANTAL) {
   d_dal <- df_dalarna |>
     dplyr::filter(antal_ar == antal_ar_val) |>
     dplyr::group_by(ar) |>
@@ -802,7 +904,8 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
                      antal_sum  = sum(antal, na.rm = TRUE),
                      .groups = "drop") |>
     dplyr::mutate(
-      andel   = dplyr::if_else(antal_sum > 0, status_sum / antal_sum, NA_real_),
+      andel   = dplyr::if_else(antal_sum > 0 & !.dold(antal_sum, min_antal),
+                               status_sum / antal_sum, NA_real_),
       serie   = "Dalarna",
       tooltip = paste0("Dalarna ", ar, ": ", scales::percent(andel, accuracy = 0.1)))
 
@@ -813,8 +916,9 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
       serie   = "Riket",
       tooltip = paste0("Riket ", ar, ": ", scales::percent(andel, accuracy = 0.1)))
 
-  d <- dplyr::bind_rows(d_dal, d_rik) |> dplyr::filter(!is.na(andel))
-  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+  dolda <- any(.dold(d_dal$antal_sum, min_antal))
+  d <- dplyr::bind_rows(d_dal, d_rik)
+  if (all(is.na(d$andel))) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
 
   # Mappa startår -> full examensperiod ("2014–2016") för x-axeletiketter.
   # Hämtas ur df_dalarna som har exam_ar_interval.
@@ -828,9 +932,9 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel,
                                        color = serie, group = serie,
                                        linetype = serie)) +
-    ggplot2::geom_line(linewidth = 0.9) +
+    ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.4) +
+      ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)), size = 2.4, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = serie_farger, name = NULL) +
     ggplot2::scale_linetype_manual(
       values = c("Dalarna" = "solid", "Riket" = "dashed"), guide = "none") +
@@ -841,7 +945,7 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
                                 limits = c(0, NA)) +
     ggplot2::labs(x = "Examensperiod", y = NULL,
                   title = rubrik, subtitle = underrubrik,
-                  caption = .kalltext(kalla)) +
+                  caption = .kalltext(kalla, dolda, min_antal)) +
     .rd_tema() +
     ggplot2::theme(legend.position    = "top",
                    axis.text.x        = ggplot2::element_text(size = 7.5),

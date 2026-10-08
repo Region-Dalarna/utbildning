@@ -13,6 +13,8 @@
 
 .KALLA_ANTAGNING <- "Gymnasieantagningen, Dalarnas kommunförbund"
 .KALLA_GYMN_ETABL <- kalla_rud("Gymnasiet – avgångna och RAKS/BAS")
+# Röjandekontroll (MIN_ANTAL) gäller bara etableringen, som är mikrodata.
+# Övriga diagram bygger på publicerad statistik och anropas med min_antal = 0.
 
 gymnasiet_struktur <- list(
   antagning = list(
@@ -792,7 +794,7 @@ mod_gymnasiet_server <- function(id) {
         # samverkansområde (se genomstromning_dalarna()) – annars används
         # Skolverkets egen färdiga siffra rakt av, ingen viktning i appen.
         if ("vikt" %in% names(df_gs)) sub_gs <- paste0(sub_gs, " · viktat efter antal elever")
-        skapa_diagram_genomstromning_bar(df_gs, input$ar,
+        skapa_diagram_genomstromning_bar(min_antal = 0, df_gs, input$ar,
                                          rubrik = ind$amne,
                                          underrubrik = sub_gs, kalla = ind$kalla)
       } else {
@@ -807,16 +809,16 @@ mod_gymnasiet_server <- function(id) {
           # färdig rad (se data_bas()/"Alla"-raden), ingen viktning då.
           sub_andel <- if (dplyr::n_distinct(df$kommkod) > 1)
             paste0(sub, " · viktat efter antal elever") else sub
-          skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
+          skapa_diagram_bar_andel(min_antal = 0, df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
                                   rubrik = paste0(ind$amne, " efter program"),
                                   underrubrik = sub_andel,
                                   kalla = ind$kalla)
         } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
-          skapa_diagram_bar_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, input$ar,
+          skapa_diagram_bar_kon(min_antal = 0, df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, input$ar,
                                 rubrik = paste0(ind$amne, " efter program"),
                                 underrubrik = sub, kalla = ind$kalla)
         } else {
-          skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
+          skapa_diagram_bar(min_antal = 0, df, ind$metrik, ind$metrik_label, input$ar,
                             rubrik = paste0(ind$amne, " efter program"),
                             underrubrik = sub, kalla = ind$kalla)
         }
@@ -862,7 +864,7 @@ mod_gymnasiet_server <- function(id) {
       # Se motsvarande kommentar i d_bar ovan: "vikt" finns bara vid
       # samverkansområde.
       if ("vikt" %in% names(df_prog)) sub <- paste0(sub, " · viktat efter antal elever")
-      skapa_diagram_genomstromning_trend(df_prog, df_rik,
+      skapa_diagram_genomstromning_trend(min_antal = 0, df_prog, df_rik,
                                          rubrik = rub, underrubrik = sub,
                                          kalla = ind$kalla)
     })
@@ -884,14 +886,14 @@ mod_gymnasiet_server <- function(id) {
         # Se motsvarande kommentar vid d_bar ovan.
         sub_andel <- if (dplyr::n_distinct(df$kommkod) > 1)
           paste0(sub, " · viktat efter antal elever") else sub
-        skapa_diagram_trend_andel(df, ind$metrik, ind$vikt, ind$metrik_label, prog,
+        skapa_diagram_trend_andel(min_antal = 0, df, ind$metrik, ind$vikt, ind$metrik_label, prog,
                                   rubrik = rub, underrubrik = sub_andel,
                                   kalla = ind$kalla)
       } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
-        skapa_diagram_trend_kon(df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, prog,
+        skapa_diagram_trend_kon(min_antal = 0, df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, prog,
                                 rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       } else {
-        skapa_diagram_trend(df, ind$metrik, ind$metrik_label, prog,
+        skapa_diagram_trend(min_antal = 0, df, ind$metrik, ind$metrik_label, prog,
                             rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       }
     })
@@ -919,18 +921,20 @@ mod_gymnasiet_server <- function(id) {
       k
     })
 
-    # Etableringsdata laddas ner summerad (se summera_etablering_nedladdning()).
+    # Etableringsdata laddas ner summerad och röjandekontrollerad (se
+    # summera_etablering_nedladdning()). Övrig data i fliken är publicerad
+    # statistik (gymnasieantagningen, Skolverket) - därför min_antal = 0.
     nedladdning <- function(d) {
       if (identical(input$omrade, "etablering")) summera_etablering_nedladdning(d) else d
     }
 
     output$ladda_ner <- downloadHandler(
       filename = function() paste0(input$omrade, "_", input$indikator, "_", input$ar, ".xlsx"),
-      content  = function(file) skriv_gymnasie_excel(nedladdning(data_ar()), file)
+      content  = function(file) skriv_gymnasie_excel(nedladdning(data_ar()), file, min_antal = 0)
     )
     output$ladda_ner_alla <- downloadHandler(
       filename = function() paste0(input$omrade, "_hela_datasetet.xlsx"),
-      content  = function(file) skriv_gymnasie_excel(nedladdning(aktuell_data()), file)
+      content  = function(file) skriv_gymnasie_excel(nedladdning(aktuell_data()), file, min_antal = 0)
     )
   })
 }

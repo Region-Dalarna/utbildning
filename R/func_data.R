@@ -400,7 +400,10 @@ etablering_riket <- function(df_full, program_val = NULL, metrik) {
 
 # Enkel men snygg formatering: fet rubrikrad i petrolblått, autobredd på
 # kolumner, fryst rubrikrad och autofilter. Kräver paketet openxlsx.
-skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet") {
+# Röjandekontroll (MIN_ANTAL, se nedan) görs innan filen skrivs.
+# min_antal = 0 stänger av den (publicerad statistik, t.ex. gymnasieantagningen).
+skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet", min_antal = MIN_ANTAL) {
+  df <- rojandekontroll_tabell(df, min_antal)
   wb <- openxlsx::createWorkbook()
   openxlsx::addWorksheet(wb, blad)
 
@@ -420,9 +423,8 @@ skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet") {
 # Etableringsdatan har rader med en eller ett par personer (och i
 # gymnasiets fall bo-/arbetskommun och inkomst per rad). Nedladdningen
 # summeras därför till samma nivå som diagrammen. Celler med färre än
-# ETABLERING_MIN_ANTAL personer får tomma värden, och medelinkomsten visas
-# bara när minst så många etablerade har uppgift om inkomst.
-ETABLERING_MIN_ANTAL <- 5
+# MIN_ANTAL personer får tomma värden, och medelinkomsten visas bara när
+# minst så många etablerade har uppgift om inkomst.
 
 summera_etablering_nedladdning <- function(df) {
   grupp <- intersect(c("exam_ar_interval", "uppf_ar_interval", "antal_ar", "geo_niva",
@@ -452,11 +454,58 @@ summera_etablering_nedladdning <- function(df) {
                     ~dplyr::if_else(antal > 0, round(100 * .x / antal, 1), NA_real_),
                     .names = "andel_{.col}"),
       medelinkomst_etabl = dplyr::if_else(
-        etabl_med_inkomst >= ETABLERING_MIN_ANTAL & antal >= ETABLERING_MIN_ANTAL,
+        etabl_med_inkomst >= MIN_ANTAL & antal >= MIN_ANTAL,
         round(inkomst_summa / etabl_med_inkomst), NA_real_),
       dplyr::across(dplyr::all_of(c(status, paste0("andel_", status))),
-                    ~dplyr::if_else(antal < ETABLERING_MIN_ANTAL, NA_real_, as.numeric(.x)))
+                    ~dplyr::if_else(antal < MIN_ANTAL, NA_real_, as.numeric(.x)))
     ) |>
     dplyr::select(-inkomst_summa, -etabl_med_inkomst) |>
-    dplyr::arrange(dplyr::across(dplyr::all_of(grupp)))
+    dplyr::arrange(dplyr::across(dplyr::all_of(grupp))) |>
+    structure(rojandekontrollerad = TRUE)   # rojandekontroll_tabell() hoppar över
+}
+
+# ============================================================
+#  Röjandekontroll
+# ============================================================
+# Värden som bygger på färre än MIN_ANTAL personer visas inte - varken i
+# diagrammen (se func_diagram.R) eller i nedladdningen. Gäller mikrodata
+# från Regionala utvecklingsdatabasen; publicerad statistik (Skolverket,
+# gymnasieantagningen) undantas med min_antal = 0.
+MIN_ANTAL <- 5
+
+# Andelar/medelvärden och den kolumn som är deras underlag (nämnare).
+.ROJ_UNDERLAG <- c(
+  andel             = "avslutade",            # genomströmning
+  andel_godkant     = "avslutad_kurs",
+  andel_avbrott     = "kursdeltaganden",
+  andel_inskrivna   = "antal_barn",
+  andel_behorig     = "behorig_underlag",
+  andel_en_godkant  = "en_underlag",
+  andel_ma_godkant  = "ma_underlag",
+  andel_sv_godkant  = "sv_underlag",
+  andel_sva_godkant = "sva_underlag",
+  meritvarde_m2_medel = "meritvarde_underlag",
+  meritvarde_medel  = "antal_med_meritvarde"
+)
+
+# Kolumner som är tal men inte antal personer (år, koder m.m.).
+.ROJ_EJ_ANTAL <- "^(ar|antal_ar|startar|kursinr|hman|huvudman|niva|kon)$|^andel|medel|inkomst|_underlag$"
+
+# Döljer i en tabell för nedladdning: andelar vars underlag är under
+# min_antal, och antal mellan 1 och min_antal - 1.
+rojandekontroll_tabell <- function(df, min_antal = MIN_ANTAL) {
+  if (min_antal <= 0 || isTRUE(attr(df, "rojandekontrollerad"))) return(df)
+  # 1. Andelar efter sitt underlag (innan underlaget självt döljs).
+  for (kol in intersect(names(.ROJ_UNDERLAG), names(df))) {
+    und <- .ROJ_UNDERLAG[[kol]]
+    if (und %in% names(df))
+      df[[kol]] <- dplyr::if_else(df[[und]] < min_antal, NA_real_, as.numeric(df[[kol]]))
+  }
+  # 2. Små antal.
+  antal_kol <- names(df)[vapply(df, is.numeric, logical(1)) & !grepl(.ROJ_EJ_ANTAL, names(df))]
+  for (kol in antal_kol) {
+    x <- df[[kol]]
+    df[[kol]] <- dplyr::if_else(!is.na(x) & x > 0 & x < min_antal, NA_real_, as.numeric(x))
+  }
+  df
 }
