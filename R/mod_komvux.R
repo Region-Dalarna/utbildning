@@ -10,7 +10,7 @@
 #  Utbildningstyp (Komvux/SFI) är ett eget filter, inte en diagramdimension.
 # ============================================================
 
-.KALLA_KOMVUX <- "SCB, Komvux/SFI"
+.KALLA_KOMVUX <- kalla_rud("Komvux och SFI – kursdeltagare")
 .KOMVUX_ANTAL_KURSER <- 15
 
 komvux_struktur <- list(

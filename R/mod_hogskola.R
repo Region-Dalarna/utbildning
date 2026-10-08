@@ -19,7 +19,9 @@
 #  lärosätena utan "Övriga", och totalen hämtas från egen granularitet.
 # ============================================================
 
-.KALLA_HOGSKOLA <- "SCB, Universitet och högskolor"
+.KALLA_HOGSKOLA_REG   <- kalla_rud("HReg – registrerade")
+.KALLA_HOGSKOLA_EXAM  <- kalla_rud("HReg – examen")
+.KALLA_HOGSKOLA_ETABL <- kalla_rud("HReg – examen och RAKS")
 .HOGSKOLA_ANTAL_STAPLAR <- 15
 
 hogskola_struktur <- list(
@@ -29,14 +31,14 @@ hogskola_struktur <- list(
       deltagare = list(label = "Studenter", klar = TRUE, vy = "dashboard", kon = TRUE,
                        amne = "Antal studenter",
                        metrik = "deltagare", metrik_label = "Antal studenter",
-                       kalla = .KALLA_HOGSKOLA,
+                       kalla = .KALLA_HOGSKOLA_REG,
                        beskrivning = paste(
                          "Antal unika studenter under året. En student kan läsa flera program",
                          "eller vid flera lärosäten, så staplarna summerar inte till totalen.")),
       kursregistreringar = list(label = "Kursregistreringar", klar = TRUE, vy = "dashboard", kon = TRUE,
                                 amne = "Kursregistreringar",
                                 metrik = "kursregistreringar", metrik_label = "Antal kursregistreringar",
-                                kalla = .KALLA_HOGSKOLA,
+                                kalla = .KALLA_HOGSKOLA_REG,
                                 beskrivning = "Antal kursregistreringar under året (en student kan läsa flera kurser).")
     )
   ),
@@ -46,7 +48,7 @@ hogskola_struktur <- list(
       antal_examina = list(label = "Examina", klar = TRUE, vy = "dashboard", kon = TRUE,
                            amne = "Examina",
                            metrik = "antal_examina", metrik_label = "Antal examina",
-                           kalla = .KALLA_HOGSKOLA,
+                           kalla = .KALLA_HOGSKOLA_EXAM,
                            beskrivning = paste(
                              "Antal utfärdade examina under året per ämnesområde (SUN 2020).",
                              "En person kan ta flera examina."))
@@ -57,22 +59,22 @@ hogskola_struktur <- list(
     indikatorer = list(
       etabl  = list(label = "Etablerade",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Etablerade på arbetsmarknaden", metrik = "etabl",
-                    metrik_label = "Andel etablerade", kalla = "SCB/RAKS",
+                    metrik_label = "Andel etablerade", kalla = .KALLA_HOGSKOLA_ETABL,
                     beskrivning = paste(
                       "Samma RAKS-definition som gymnasiets etablering (se den fliken):",
                       "anställd med tillräcklig inkomst och utan arbetslöshetsersättning",
                       "under uppföljningsåret.")),
       syss   = list(label = "Sysselsatta", klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Sysselsatta efter examen", metrik = "syss",
-                    metrik_label = "Andel sysselsatta", kalla = "SCB/RAKS",
+                    metrik_label = "Andel sysselsatta", kalla = .KALLA_HOGSKOLA_ETABL,
                     beskrivning = "Sysselsatt är den som har sin största inkomst från arbete."),
       stud   = list(label = "Studerande",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Studerande efter examen", metrik = "stud",
-                    metrik_label = "Andel studerande", kalla = "SCB/RAKS",
+                    metrik_label = "Andel studerande", kalla = .KALLA_HOGSKOLA_ETABL,
                     beskrivning = "Studerande är den som har sin största inkomst från studier."),
       arblos = list(label = "Arbetslösa",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Arbetslösa efter examen", metrik = "arblos",
-                    metrik_label = "Andel arbetslösa", kalla = "SCB/RAKS",
+                    metrik_label = "Andel arbetslösa", kalla = .KALLA_HOGSKOLA_ETABL,
                     beskrivning = "Arbetslös är den som har sin största inkomst från arbetslöshetsersättningar.")
     )
   )
@@ -508,7 +510,9 @@ mod_hogskola_server <- function(id) {
     })
 
     output$d_trend <- ggiraph::renderGirafe({
-      ind <- valt_indikator(); req(isTRUE(ind$klar))
+      # Etablering har egen trend (d_etablering_trend) - rita inte den här
+      # med etableringsmåtten när vyn just bytts.
+      ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() != "etablering")
       prog <- program_vald()
       # Valt program/lärosäte: dess egen serie. Annars totalen.
       df <- if (is.null(prog)) total_data() else dplyr::filter(stapel_data(), program == prog)

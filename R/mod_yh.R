@@ -17,7 +17,8 @@
 #  se func_data_yh.R för hur kolumnerna döps om för att passa kontraktet.
 # ============================================================
 
-.KALLA_YH <- "SCB, Yrkeshögskolan"
+.KALLA_YH <- kalla_rud("YH – studerande")
+.KALLA_YH_ETABL <- kalla_rud("YH – studerande och RAKS")
 
 yh_struktur <- list(
   studerande = list(
@@ -61,22 +62,22 @@ yh_struktur <- list(
     indikatorer = list(
       etabl  = list(label = "Etablerade",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Etablerade på arbetsmarknaden", metrik = "etabl",
-                    metrik_label = "Andel etablerade", kalla = "SCB/RAKS",
+                    metrik_label = "Andel etablerade", kalla = .KALLA_YH_ETABL,
                     beskrivning = paste(
                       "Samma RAKS-definition som gymnasiets etablering (se den fliken):",
                       "anställd med tillräcklig inkomst och utan arbetslöshetsersättning",
                       "under uppföljningsåret.")),
       syss   = list(label = "Sysselsatta", klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Sysselsatta efter YH", metrik = "syss",
-                    metrik_label = "Andel sysselsatta", kalla = "SCB/RAKS",
+                    metrik_label = "Andel sysselsatta", kalla = .KALLA_YH_ETABL,
                     beskrivning = "Sysselsatt är den som har sin största inkomst från arbete."),
       stud   = list(label = "Studerande",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Studerande efter YH", metrik = "stud",
-                    metrik_label = "Andel studerande", kalla = "SCB/RAKS",
+                    metrik_label = "Andel studerande", kalla = .KALLA_YH_ETABL,
                     beskrivning = "Studerande är den som har sin största inkomst från studier."),
       arblos = list(label = "Arbetslösa",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Arbetslösa efter YH", metrik = "arblos",
-                    metrik_label = "Andel arbetslösa", kalla = "SCB/RAKS",
+                    metrik_label = "Andel arbetslösa", kalla = .KALLA_YH_ETABL,
                     beskrivning = "Arbetslös är den som har sin största inkomst från arbetslöshetsersättningar.")
     )
   )

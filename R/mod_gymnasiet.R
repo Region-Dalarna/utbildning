@@ -12,6 +12,7 @@
 # ============================================================
 
 .KALLA_ANTAGNING <- "Gymnasieantagningen, Dalarnas kommunförbund"
+.KALLA_GYMN_ETABL <- kalla_rud("Gymnasiet – avgångna och RAKS")
 
 gymnasiet_struktur <- list(
   antagning = list(
@@ -111,7 +112,7 @@ gymnasiet_struktur <- list(
       etabl = list(label = "Etablerade", klar = TRUE, vy = "etablering", kon = FALSE,
                    amne = "Etablerade på arbetsmarknaden",
                    metrik = "etabl", metrik_label = "Andel etablerade",
-                   kalla = "SCB/RAKS",
+                   kalla = .KALLA_GYMN_ETABL,
                    beskrivning = paste(
                      "Det är endast personer som är anställda (helårsanställd,",
                      "nyanställd, avgången eller delårsanställd) som kan definieras",
@@ -129,17 +130,17 @@ gymnasiet_struktur <- list(
       syss  = list(label = "Sysselsatta", klar = TRUE, vy = "etablering", kon = FALSE,
                    amne = "Sysselsatta efter gymnasiet",
                    metrik = "syss", metrik_label = "Andel sysselsatta",
-                   kalla = "SCB/RAKS",
+                   kalla = .KALLA_GYMN_ETABL,
                    beskrivning = "Sysselsatt är den som har sin största inkomst från arbete."),
       stud  = list(label = "Studerande", klar = TRUE, vy = "etablering", kon = FALSE,
                    amne = "Studerande efter gymnasiet",
                    metrik = "stud", metrik_label = "Andel studerande",
-                   kalla = "SCB/RAKS",
+                   kalla = .KALLA_GYMN_ETABL,
                    beskrivning = "Studerande är den som har sin största inkomst från studier."),
       arblos = list(label = "Arbetslösa", klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Arbetslösa efter gymnasiet",
                     metrik = "arblos", metrik_label = "Andel arbetslösa",
-                    kalla = "SCB/RAKS",
+                    kalla = .KALLA_GYMN_ETABL,
                     beskrivning = paste(
                       "Arbetslös är den som har sin största inkomst från",
                       "arbetslöshetsersättningar."))

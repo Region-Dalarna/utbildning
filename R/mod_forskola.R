@@ -9,7 +9,7 @@
 #  Född i Sverige/utomlands är ett filter i sidopanelen.
 # ============================================================
 
-.KALLA_FORSKOLA <- "SCB, Förskolan"
+.KALLA_FORSKOLA <- kalla_rud("Förskola – barn")
 
 forskola_struktur <- list(
   inskrivning = list(

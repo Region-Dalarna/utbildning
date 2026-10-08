@@ -21,6 +21,11 @@
     ggplot2::theme_void()
 }
 
+# Mikrodata från SCB:s uppdrag Regionala utvecklingsdatabasen. Tabellnamnen
+# följer registrens namn i leveransens variabellista.
+KALLA_RUD <- "Regionala utvecklingsdatabasen (SCB)"
+kalla_rud <- function(tabell) paste0(KALLA_RUD, ", ", tabell)
+
 # Källtext -> caption (med "Källa: "-prefix). NULL ger ingen caption.
 .kalltext <- function(kalla) {
   if (is.null(kalla) || !nzchar(kalla)) NULL else paste0("Källa: ", kalla)

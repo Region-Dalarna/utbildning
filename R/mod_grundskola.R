@@ -14,7 +14,7 @@
 #  enhet "" i stället för " %" (se skapa_diagram_bar_andel()).
 # ============================================================
 
-.KALLA_GRUNDSKOLA <- "SCB, Grundskolans slutbetyg åk 9"
+.KALLA_GRUNDSKOLA <- kalla_rud("Årskurs 9 – betyg")
 
 # Läggs sist i alla indikatorbeskrivningar: siffrorna bygger på elever med
 # slutbetyg per skolans kommun, medan SCB:s officiella statistik utgår från

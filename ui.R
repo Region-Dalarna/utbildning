@@ -52,7 +52,8 @@ shinyUI(
                 'högskola, grundskola och folkhögskola.'),
               div(class = 'rd-info',
                   tags$strong('Källa: '),
-                  'Gymnasieantagningen (Dalarnas kommunförbund), SCB (Förskolan, Yrkeshögskolan, Komvux/SFI, Universitet och högskolor, Grundskolans slutbetyg, Folkhögskolan).')
+                  'Regionala utvecklingsdatabasen (SCB), Skolverket och ',
+                  'Gymnasieantagningen (Dalarnas kommunförbund).')
           )
         )
       )

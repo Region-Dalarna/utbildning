@@ -13,7 +13,7 @@
 #  kommun).
 # ============================================================
 
-.KALLA_FOLKHOGSKOLA <- "SCB, Folkhögskolan"
+.KALLA_FOLKHOGSKOLA <- kalla_rud("Folkhögskolan")
 
 folkhogskola_struktur <- list(
   deltagande = list(
