@@ -16,7 +16,6 @@ R/                laddas AUTOMATISKT av Shiny (>= 1.5.0), bokstavsordning, efter
   func_diagram.R              diagramfunktioner (ggiraph)
   func_karta.R                referenskarta över kommuner/samverkansområden (sf)
   mod_*.R                     en modul per skolform
-dataskript/       körs manuellt, inte av appen (se nedan)
 www/              CSS, favicon, logga, tooltips
 ```
 
@@ -50,12 +49,10 @@ Tabellerna hämtas en gång per R-process och cachas. Komvux och Folkhögskola h
 en kolumn `granularitet`: deltagare (unika individer) får inte summeras över
 finare nivåer, så de läses från den nivå som motsvarar diagrammet.
 
-## Dataskript
-- `dataskript/yh_till_databas.R` – städar SCB:s YH-filer och skriver
-  `yh_studerande`, `yh_genomstromning`, `yh_uppfoljning` och
-  `yh_uppfoljning_arbetsort`.
-- `dataskript/hogskola_uppfoljning_till_databas.R` – summerar den
-  individnära `hogskola_uppfoljning` till `hogskola_etablering`.
+## Data in i databasen
+Appen läser bara från databasen. Tabellerna skrivs med separata skript
+utanför det här repot (t.ex. `hogskola_etablering`, som är en summering av
+den individnära högskoleuppföljningen).
 
 ## Nedladdning
 "Ladda ner aktuellt urval" och "Ladda ner hela datasetet" ger Excelfiler.
