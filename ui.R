@@ -53,7 +53,11 @@ shinyUI(
               div(class = 'rd-info',
                   tags$strong('Källa: '),
                   'Regionala utvecklingsdatabasen (SCB), Skolverket och ',
-                  'Gymnasieantagningen (Dalarnas kommunförbund).')
+                  'Gymnasieantagningen (Dalarnas kommunförbund).'),
+              p(class = 'rd-hint',
+                'Etablering efter examen bygger på Registerbaserad aktivitetsstatistik ',
+                '(RAKS) och, från och med 2020, Befolkningens arbetsmarknadsstatus (BAS). ',
+                'HReg är SCB:s register över studenter och examina i högskolan.')
           )
         )
       )

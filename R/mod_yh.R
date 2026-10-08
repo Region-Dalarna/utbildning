@@ -18,7 +18,7 @@
 # ============================================================
 
 .KALLA_YH <- kalla_rud("YH – studerande")
-.KALLA_YH_ETABL <- kalla_rud("YH – studerande och RAKS")
+.KALLA_YH_ETABL <- kalla_rud("YH – studerande och RAKS/BAS")
 
 yh_struktur <- list(
   studerande = list(

@@ -12,7 +12,7 @@
 # ============================================================
 
 .KALLA_ANTAGNING <- "Gymnasieantagningen, Dalarnas kommunförbund"
-.KALLA_GYMN_ETABL <- kalla_rud("Gymnasiet – avgångna och RAKS")
+.KALLA_GYMN_ETABL <- kalla_rud("Gymnasiet – avgångna och RAKS/BAS")
 
 gymnasiet_struktur <- list(
   antagning = list(

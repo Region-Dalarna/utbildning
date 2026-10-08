@@ -21,7 +21,7 @@
 
 .KALLA_HOGSKOLA_REG   <- kalla_rud("HReg – registrerade")
 .KALLA_HOGSKOLA_EXAM  <- kalla_rud("HReg – examen")
-.KALLA_HOGSKOLA_ETABL <- kalla_rud("HReg – examen och RAKS")
+.KALLA_HOGSKOLA_ETABL <- kalla_rud("HReg – examen och RAKS/BAS")
 .HOGSKOLA_ANTAL_STAPLAR <- 15
 
 hogskola_struktur <- list(
