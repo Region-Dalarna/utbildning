@@ -59,11 +59,27 @@ avgangna_struktur <- list(
                    amne = "Avgångna efter typ av betyg", metrik = "avgangna",
                    metrik_label = "Antal avgångna",
                    beskrivning = "Vilken typ av betyg eller betygsdokument de avgångna har (SCB:s Avgb_Typ)."),
-  # Väntar på bekräftad kodlista för beh (0/1).
-  behorighet = list(label = "Behörighet", klar = FALSE, vy = "andel",
-                    amne = "Andel med grundläggande behörighet",
-                    beskrivning = "Grundläggande behörighet till högskolan. Läggs in när kodlistan är bekräftad.")
+  # Beh: 1 = behörig, 0 = ej behörig, tomt = IB, Waldorf eller samlat
+  # betygsdokument (räknas inte med). Finns bara som totaler (TypBeh).
+  behorighet = list(label = "Behörighet", klar = TRUE, vy = "behorighet",
+                    amne = "Andel med grundläggande behörighet till högskolan",
+                    metrik = "andel_beh", vikt = "beh_underlag",
+                    metrik_label = "Andel behöriga (%)",
+                    beskrivning = paste(
+                      "Andel av de avgångna vars utbildning ger grundläggande behörighet till",
+                      "högskolestudier. Elever som läser IB eller Waldorf, eller som tagit ut",
+                      "samlat betygsdokument, saknar uppgift och räknas inte med."))
 )
+
+# Andel behöriga per (ar, område) ur TypBeh-rader.
+.avg_beh_summera <- function(d) {
+  d |>
+    dplyr::group_by(ar, kommkod, kommun, geo_niva) |>
+    dplyr::summarise(behoriga     = sum(avgangna[beh %in% 1], na.rm = TRUE),
+                     beh_underlag = sum(avgangna[beh %in% c(0, 1)], na.rm = TRUE),
+                     .groups = "drop") |>
+    dplyr::mutate(andel_beh = dplyr::if_else(beh_underlag > 0, 100 * behoriga / beh_underlag, NA_real_))
+}
 
 # ---- UI --------------------------------------------------------------------
 mod_gymnasiet_avgangna_ui <- function(id) {
@@ -140,7 +156,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
     # Uppdelning (knapparna under diagrammet): "total" eller en av AVGANGNA_GRUPPER.
     lage <- reactive({
       l <- input$uppdelning
-      if (is.null(l) || !l %in% names(AVGANGNA_GRUPPER) || vy() == "betygstyp") "total" else l
+      if (is.null(l) || !l %in% names(AVGANGNA_GRUPPER) || vy() %in% c("betygstyp", "behorighet")) "total" else l
     })
     grupp <- reactive(if (lage() == "total") NULL else AVGANGNA_GRUPPER[[lage()]])
     huvudman <- reactive(if (is.null(input$huvudman)) "_alla_" else input$huvudman)
@@ -164,7 +180,8 @@ mod_gymnasiet_avgangna_server <- function(id) {
     # Kan programdiagrammet visas med valda filter? Utan detaljgranulariteten
     # bara utan uppdelning och utan huvudmansfilter (och inte för betygstyp).
     prog_vy <- reactive({
-      har_detalj() || (lage() == "total" && huvudman() == "_alla_" && vy() != "betygstyp")
+      vy() != "behorighet" &&
+        (har_detalj() || (lage() == "total" && huvudman() == "_alla_" && vy() != "betygstyp"))
     })
 
     output$ar_ui <- renderUI({
@@ -231,6 +248,9 @@ mod_gymnasiet_avgangna_server <- function(id) {
       dplyr::filter(d, .data[[prog_kol()]] %in% storst)
     })
 
+    serie_namn <- function(k) dplyr::case_when(k == "00" ~ "Riket", k == "20" ~ "Dalarna", TRUE ~ omr_namn())
+    jmf_koder  <- reactive(unique(c(omr_kod(), "20", "00")))
+
     underrubrik <- function(med_ar = FALSE) {
       persp <- if (identical(input$perspektiv, "bokommun")) "bokommun" else "skolkommun"
       txt <- paste0(omr_namn(), " (", persp, ")")
@@ -253,7 +273,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
                else "Klicka på en inriktning för att se utvecklingen över tid.")
       tillbaka <- if (!is.null(drill) && prog_vy())
         actionLink(ns("tillbaka"), "← Alla program", class = "rd-tillbaka")
-      knappar <- if (vy() != "betygstyp")
+      knappar <- if (!vy() %in% c("betygstyp", "behorighet"))
         div(class = "rd-kon-kontroll",
             shinyWidgets::radioGroupButtons(
               inputId = ns("uppdelning"), label = NULL,
@@ -271,6 +291,16 @@ mod_gymnasiet_avgangna_server <- function(id) {
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
       sub <- underrubrik(TRUE)
+      # Behörighet: valt område jämfört med Dalarna och riket (bara totaler).
+      if (vy() == "behorighet") {
+        d <- gran("TypBeh") |>
+          dplyr::filter(ar == as.integer(req(input$ar)), kommkod %in% jmf_koder()) |>
+          .avg_beh_summera() |>
+          dplyr::mutate(program = serie_namn(kommkod))
+        validate(need(nrow(d) > 0, "Inga data för valt urval."))
+        return(skapa_diagram_bar_andel(d, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
+                                       rubrik = ind$amne, underrubrik = sub, kalla = .KALLA_AVGANGNA))
+      }
       if (prog_vy()) {
         d <- prog_ar()
         validate(need(nrow(d) > 0, "Inga data för valt urval."))
@@ -357,6 +387,16 @@ mod_gymnasiet_avgangna_server <- function(id) {
       rub <- paste0(ind$amne, " – ", if (is.null(fokus)) "utveckling över tid" else fokus)
       sub <- underrubrik()
 
+      if (vy() == "behorighet") {
+        d <- gran("TypBeh") |> dplyr::filter(kommkod %in% jmf_koder()) |> .avg_beh_summera() |>
+          dplyr::mutate(serie = factor(serie_namn(kommkod), levels = unique(serie_namn(jmf_koder()))),
+                        varde = andel_beh, underlag = beh_underlag)
+        validate(need(nrow(d) > 0, "Inga data."))
+        return(skapa_diagram_trend_jmf(d, ind$metrik_label, rubrik = rub,
+                                       underrubrik = paste0(sub, " jämfört med Dalarna och riket"),
+                                       kalla = .KALLA_AVGANGNA))
+      }
+
       # Betygstyp: andel per betygstyp över tid i valt område.
       if (vy() == "betygstyp") {
         d <- trend_rader(omr_kod()) |>
@@ -391,8 +431,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
       if (vy() == "examen")
         return(skapa_diagram_trend(dplyr::filter(d, kommkod == omr_kod()), "avgangna", ind$metrik_label,
                                    rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
-      serie <- function(k) dplyr::case_when(k == "00" ~ "Riket", k == "20" ~ "Dalarna", TRUE ~ omr_namn())
-      d <- dplyr::mutate(d, serie = factor(serie(kommkod), levels = unique(serie(koder))),
+      d <- dplyr::mutate(d, serie = factor(serie_namn(kommkod), levels = unique(serie_namn(koder))),
                          varde = .data[[ind$metrik]], underlag = .data[[ind$vikt]])
       skapa_diagram_trend_jmf(d, ind$metrik_label, rubrik = rub,
                               underrubrik = paste0(sub, " jämfört med Dalarna och riket"),
@@ -402,9 +441,15 @@ mod_gymnasiet_avgangna_server <- function(id) {
     # Kända begränsningar, beroende på val.
     output$notiser <- renderUI({
       n <- "Examen omfattar högskoleförberedande examen, yrkesexamen och International Baccalaureate (IB)."
-      if (!prog_vy())
+      if (vy() == "behorighet") {
+        n <- c(n, paste("Behörighet finns inte per program, huvudman eller grupp i data -",
+                        "diagrammen visar valt område jämfört med Dalarna och riket.",
+                        "Elever som läser IB eller Waldorf, eller som tagit ut samlat",
+                        "betygsdokument, saknar uppgift och räknas inte med."))
+      } else if (!prog_vy()) {
         n <- c(n, paste("Uppdelning per program med valda inställningar finns inte i data än.",
                         "Diagrammet visar därför fördelningen för hela området."))
+      }
       if (identical(lage(), "nyanland"))
         n <- c(n, paste("Nyanländ = högst 4 år i Sverige, räknat från senaste invandringsår.",
                         "Även svenskfödda som återinvandrat kan ingå."))
@@ -420,6 +465,9 @@ mod_gymnasiet_avgangna_server <- function(id) {
 
     # ---- Nedladdning --------------------------------------------------------------
     urval_data <- function() {
+      if (vy() == "behorighet")
+        return(gran("TypBeh") |> dplyr::filter(ar == as.integer(req(input$ar)), kommkod %in% jmf_koder()) |>
+                 .avg_beh_summera())
       if (prog_vy()) {
         d <- prog_ar()
         return(avgangna_summera(d, prog_kol(), if (!is.null(grupp())) grupp()$kol))
