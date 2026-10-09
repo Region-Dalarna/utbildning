@@ -63,3 +63,14 @@ geo_val_kommun <- {
 geo_val_samverkan <- stringr::str_sort(unique(kommun_samverkan$samverkansomrade),
                                        locale = "sv")
 geo_val_samverkan <- setNames(geo_val_samverkan, geo_val_samverkan)
+
+# "Hela Gysam" = Gysam Siljan + Gysam Södra + Gysam Västra. Väljs som ett
+# eget område i samverkansläget; samverkan_i() tolkar det vid filtrering.
+GYSAM_HELA <- "Hela Gysam"
+GYSAM_OMRADEN <- grep("^Gysam ", unique(kommun_samverkan$samverkansomrade), value = TRUE)
+
+# TRUE för kommuner som hör till valt samverkansområde (eller till Hela Gysam).
+samverkan_i <- function(samverkansomrade, val) {
+  if (identical(val, GYSAM_HELA)) samverkansomrade %in% GYSAM_OMRADEN
+  else samverkansomrade == val
+}

@@ -388,7 +388,7 @@ mod_gymnasiet_server <- function(id) {
       } else if (input$geo_niva == "kommun") {
         d <- dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
       } else {
-        d <- dplyr::filter(d, geo_niva == "kommun", samverkansomrade == gv)
+        d <- dplyr::filter(d, geo_niva == "kommun", samverkan_i(samverkansomrade, gv))
       }
 
       # Driftsformsfilter
@@ -496,7 +496,8 @@ mod_gymnasiet_server <- function(id) {
     })
 
     observeEvent(input$geo_niva, {
-      val <- if (input$geo_niva == "kommun") geo_val_kommun else geo_val_samverkan
+      val <- if (input$geo_niva == "kommun") geo_val_kommun
+             else c(stats::setNames(GYSAM_HELA, GYSAM_HELA), geo_val_samverkan)   # Hela Gysam överst
       shinyWidgets::updatePickerInput(
         session, "geo_val",
         choices = c("Hela Dalarna" = "_alla_", val), selected = "_alla_")
@@ -570,11 +571,11 @@ mod_gymnasiet_server <- function(id) {
         } else {
           # Samverkansområde: ingen färdig aggregatrad finns på den nivån,
           # så där vaktar vi ihop kommunraderna som tillhör området.
-          d <- dplyr::filter(d, geo_niva == "kommun", samverkansomrade == gv)
+          d <- dplyr::filter(d, geo_niva == "kommun", samverkan_i(samverkansomrade, gv))
         }
       } else if (gv != "_alla_") {
         d <- if (input$geo_niva == "kommun")
-          dplyr::filter(d, kommkod == gv) else dplyr::filter(d, samverkansomrade == gv)
+          dplyr::filter(d, kommkod == gv) else dplyr::filter(d, samverkan_i(samverkansomrade, gv))
       }
 
       d <- filtrera_driftsform(d, input$organisationstyp)
@@ -628,7 +629,7 @@ mod_gymnasiet_server <- function(id) {
         # medel. Om en programrad saknar matchande vikt faller
         # .viktat_medel_andel() (func_diagram.R) tillbaka till ovägt medel
         # för just det programmet.
-        d |> dplyr::filter(geo_niva == "kommun", samverkansomrade == gv,
+        d |> dplyr::filter(geo_niva == "kommun", samverkan_i(samverkansomrade, gv),
                            organisationstyp == org_filter) |>
           dplyr::mutate(program = trimws(program)) |>
           dplyr::left_join(
