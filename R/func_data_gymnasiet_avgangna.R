@@ -8,7 +8,7 @@
 #  Tabellen är lång med kolumnen granularitet. Varje granularitet är en egen
 #  uppdelning - filtrera ALLTID på en och summera aldrig över flera:
 #    Typ (totaler), TypKon, TypBakgrund, TypNyanland, TypHuvudman,
-#    TypStudievag (program/inriktning), TypBeh, TypBetygstyp.
+#    TypStudievag (program/inriktning), TypBetygstyp (Avgb_Typ), TypBeh.
 #  avgangna = unika elever. Summering över elevtyp, kön och inriktning inom
 #  program är säker (en elev har en av varje).
 #
@@ -24,7 +24,21 @@ AVGANGNA_UPPDELNING <- list(
   nyanland   = list(label = "Nyanländ",         granularitet = "TypNyanland",  kol = "nyanland"),
   huvudman   = list(label = "Huvudman",         granularitet = "TypHuvudman",  kol = "huvudman"),
   program    = list(label = "Program",          granularitet = "TypStudievag", kol = "program_namn"),
-  inriktning = list(label = "Inriktning",       granularitet = "TypStudievag", kol = "inriktning_namn")
+  inriktning = list(label = "Inriktning",       granularitet = "TypStudievag", kol = "inriktning_namn"),
+  betygstyp  = list(label = "Betygstyp",        granularitet = "TypBetygstyp", kol = "avgb_typ_namn")
+)
+
+# Avgb_Typ (typ av betyg/betygsdokument) enligt SCB:s värdemängd.
+.avgb_typ_klartext <- c(
+  "B" = "Samlat betygsdokument",
+  "C" = "Certificate",
+  "D" = "Diploma",
+  "E" = "Högskoleförberedande examen",
+  "J" = "Studiebevis tekniskt fjärde år",
+  "L" = "Yrkesförberedande examen",
+  "S" = "Slutbetyg",
+  "T" = "Examensbevis T4",
+  "Z" = "Studiebevis"
 )
 
 .avgangna_cache <- new.env(parent = emptyenv())
@@ -36,8 +50,10 @@ rensa_gymnasiet_avgangna <- function(rad) {
       ar      = as.integer(ar),
       kommkod = as.character(kommkod),
       program_namn    = dplyr::coalesce(gymnasieprogram, "Okänt program"),
-      inriktning_namn = paste0(program_namn, " – ",
-                               dplyr::coalesce(inriktning, "Ingen inriktning")),
+      inriktning_kort = dplyr::coalesce(inriktning, "Ingen inriktning"),
+      inriktning_namn = paste0(program_namn, " \u2013 ", inriktning_kort),
+      avgb_typ_namn   = dplyr::coalesce(unname(.avgb_typ_klartext[avgb_typ]), avgb_typ,
+                                        "Okänd betygstyp"),
       dplyr::across(c(avgangna, jmftal_summa, antal_med_jmftal), as.numeric)
     )
 }

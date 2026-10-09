@@ -242,3 +242,6 @@ html, body { overflow-x: hidden; }
 .tippy-box[data-theme~='rd'][data-placement^='bottom'] > .tippy-arrow::before {
   border-bottom-color: var(--rd-text);
 }
+
+/* ---- Tillbaka-länk vid nedborrning (t.ex. program -> inriktning) ------ */
+.rd-tillbaka { display: inline-block; margin: 0 0 6px 4px; font-size: 0.85rem; font-weight: 500; }

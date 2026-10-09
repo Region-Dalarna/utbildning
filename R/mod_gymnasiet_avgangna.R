@@ -128,11 +128,23 @@ mod_gymnasiet_avgangna_server <- function(id) {
       if (omr_kod() == "20") "Dalarna" else dalarna_kommuner$kommun[match(omr_kod(), dalarna_kommuner$kommkod)]
     })
 
-    # Rader för valt perspektiv och vald uppdelnings granularitet.
+    # Nedborrning: med "Program" visar klick på ett program dess inriktningar.
+    program_drill <- reactiveVal(NULL)
+
+    # Gruppkolumnen som staplarna visar (inriktning när man borrat ner).
+    grupp_kol <- reactive({
+      if (identical(input$uppdelning, "program") && !is.null(program_drill())) "inriktning_kort"
+      else uppdelning()$kol
+    })
+
+    # Rader för valt perspektiv och vald uppdelnings granularitet (och valt
+    # program vid nedborrning).
     data_gran <- reactive({
       persp <- if (is.null(input$perspektiv)) "skolkommun" else input$perspektiv
-      hamta_gymnasiet_avgangna() |>
+      d <- hamta_gymnasiet_avgangna() |>
         dplyr::filter(geografi == persp, granularitet == uppdelning()$granularitet)
+      if (!is.null(program_drill())) d <- dplyr::filter(d, program_namn == program_drill())
+      d
     })
 
     output$ar_ui <- renderUI({
@@ -145,10 +157,17 @@ mod_gymnasiet_avgangna_server <- function(id) {
     program_vald <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
-      program_vald(if (length(sel) == 1 && !is.null(uppdelning()$kol)) sel else NULL)
+      if (length(sel) != 1 || is.null(uppdelning()$kol)) { program_vald(NULL); return() }
+      # Klick på ett program (utan nedborrning): visa dess inriktningar.
+      if (identical(input$uppdelning, "program") && is.null(program_drill())) {
+        program_drill(sel); program_vald(NULL); return()
+      }
+      program_vald(sel)
     }, ignoreNULL = FALSE)
-    observeEvent(list(input$uppdelning, input$perspektiv, input$geo_val), program_vald(NULL),
-                 ignoreInit = TRUE)
+    observeEvent(input$tillbaka, { program_drill(NULL); program_vald(NULL) })
+    observeEvent(list(input$uppdelning, input$perspektiv, input$geo_val), {
+      program_drill(NULL); program_vald(NULL)
+    }, ignoreInit = TRUE)
 
     # Serienamn för jämförelser: valt område, Dalarna, Riket.
     serie_namn <- function(kod) dplyr::case_when(kod == "00" ~ "Riket", kod == "20" ~ "Dalarna",
@@ -159,14 +178,14 @@ mod_gymnasiet_avgangna_server <- function(id) {
     summerat <- reactive({
       data_gran() |>
         dplyr::filter(kommkod %in% jmf_koder()) |>
-        avgangna_summera(uppdelning()$kol)
+        avgangna_summera(grupp_kol())
     })
 
     # Staplar för valt år. Utan uppdelning: valt område, Dalarna och riket.
     stapel_data <- reactive({
       ar_val <- as.integer(req(input$ar))
       d <- dplyr::filter(summerat(), ar == ar_val)
-      if (is.null(uppdelning()$kol)) {
+      if (is.null(grupp_kol())) {
         return(dplyr::mutate(d, program = serie_namn(kommkod)))
       }
       d <- dplyr::filter(d, kommkod == omr_kod())
@@ -180,7 +199,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
     # Examenstyp per grupp (för fördelningsdiagrammet).
     fordelning_data <- reactive({
       ar_val <- as.integer(req(input$ar))
-      kol <- uppdelning()$kol
+      kol <- grupp_kol()
       d <- data_gran() |> dplyr::filter(ar == ar_val, kommkod == omr_kod())
       d <- dplyr::mutate(d, program = if (is.null(kol)) omr_namn() else .data[[kol]])
       storst <- stapel_data()$program
@@ -203,18 +222,26 @@ mod_gymnasiet_avgangna_server <- function(id) {
     output$vy <- renderUI({
       ind <- valt_indikator()
       if (!isTRUE(ind$klar)) return(div(class = "rd-info", ind$beskrivning))
-      hint <- if (!is.null(uppdelning()$kol))
+      drill <- program_drill()
+      hint <- if (identical(input$uppdelning, "program") && is.null(drill))
+        tags$p(class = "rd-hint rd-hint--bar",
+               "Klicka på ett program för att se dess inriktningar.")
+      else if (!is.null(uppdelning()$kol))
         tags$p(class = "rd-hint rd-hint--bar",
                "Klicka på en stapel för att se utvecklingen över tid för gruppen.")
+      tillbaka <- if (!is.null(drill))
+        actionLink(ns("tillbaka"), "\u2190 Alla program", class = "rd-tillbaka")
       fluidRow(
-        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
+        column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
       )
     })
 
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      rub <- paste0(ind$amne, if (!is.null(uppdelning()$kol)) paste0(" efter ", tolower(uppdelning()$label)))
+      rub <- paste0(ind$amne,
+                    if (!is.null(program_drill())) paste0(" efter inriktning \u2013 ", program_drill())
+                    else if (!is.null(uppdelning()$kol)) paste0(" efter ", tolower(uppdelning()$label)))
       if (ind$vy == "fordelning") {
         d <- fordelning_data()
         validate(need(nrow(d) > 0, "Inga data för valt urval."))
@@ -242,7 +269,9 @@ mod_gymnasiet_avgangna_server <- function(id) {
                       andel_studiebevis = 100 * studiebevis / avgangna,
                       betyg = dplyr::if_else(antal_med_jmftal > 0, jmftal_summa / antal_med_jmftal, NA_real_))
       validate(need(nrow(d) > 0, "Inga data."))
-      rub <- paste0(ind$amne, " – ", if (is.null(prog)) "utveckling över tid" else prog)
+      # Nedborrat utan vald inriktning: hela programmet.
+      fokus <- if (!is.null(prog)) prog else program_drill()
+      rub <- paste0(ind$amne, " \u2013 ", if (is.null(fokus)) "utveckling över tid" else fokus)
       if (ind$vy == "fordelning") {
         d <- dplyr::filter(d, kommkod == omr_kod()) |> dplyr::mutate(program = "x")
         return(skapa_diagram_trend(d, "avgangna", ind$metrik_label, rubrik = rub,
