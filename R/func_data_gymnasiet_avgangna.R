@@ -9,23 +9,24 @@
 #  uppdelning - filtrera ALLTID på en och summera aldrig över flera:
 #    Typ (totaler), TypKon, TypBakgrund, TypNyanland, TypHuvudman,
 #    TypStudievag (program/inriktning), TypBetygstyp (Avgb_Typ), TypBeh.
-#  avgangna = unika elever. Summering över elevtyp, kön och inriktning inom
-#  program är säker (en elev har en av varje).
+#  TypStudievagDetalj (beställd): program/inriktning kombinerat med kön,
+#    bakgrund, nyanländ, huvudman och betygstyp. Finns den används den för
+#    programdiagrammet så att det kan delas upp och filtreras på huvudman.
+#  avgangna = unika elever. Inom EN granularitet är summering över alla
+#  dimensioner säker (en elev har ett värde av varje).
 #
 #  geografi: "skolkommun" (elever på skolor i området) eller "bokommun"
 #  (områdets ungdomar, var de än går i skola).
 # ============================================================
 
-# "Visa fördelat på" -> granularitet och den kolumn som är gruppen.
-AVGANGNA_UPPDELNING <- list(
-  ingen      = list(label = "Ingen uppdelning", granularitet = "Typ",          kol = NULL),
-  kon        = list(label = "Kön",              granularitet = "TypKon",       kol = "kon"),
-  bakgrund   = list(label = "Bakgrund",         granularitet = "TypBakgrund",  kol = "utlsvbakg_namn"),
-  nyanland   = list(label = "Nyanländ",         granularitet = "TypNyanland",  kol = "nyanland"),
-  huvudman   = list(label = "Huvudman",         granularitet = "TypHuvudman",  kol = "huvudman"),
-  program    = list(label = "Program",          granularitet = "TypStudievag", kol = "program_namn"),
-  inriktning = list(label = "Inriktning",       granularitet = "TypStudievag", kol = "inriktning_namn"),
-  betygstyp  = list(label = "Betygstyp",        granularitet = "TypBetygstyp", kol = "avgb_typ_namn")
+AVGANGNA_DETALJ <- "TypStudievagDetalj"
+
+# Uppdelningarna (knapparna under diagrammet): granularitet för totaler och
+# kolumnen med gruppens etikett.
+AVGANGNA_GRUPPER <- list(
+  kon      = list(label = "Kön",      granularitet = "TypKon",      kol = "grupp_kon"),
+  bakgrund = list(label = "Bakgrund", granularitet = "TypBakgrund", kol = "grupp_bakgrund"),
+  nyanland = list(label = "Nyanländ", granularitet = "TypNyanland", kol = "grupp_nyanland")
 )
 
 # Avgb_Typ (typ av betyg/betygsdokument) enligt SCB:s värdemängd.
@@ -44,6 +45,8 @@ AVGANGNA_UPPDELNING <- list(
 .avgangna_cache <- new.env(parent = emptyenv())
 
 rensa_gymnasiet_avgangna <- function(rad) {
+  saknas <- setdiff(c("utrinrfodd_namn", "avgb_typ"), names(rad))
+  for (k in saknas) rad[[k]] <- NA_character_
   rad |>
     dplyr::rename(kommkod = regionkod, kommun = region) |>
     dplyr::mutate(
@@ -51,9 +54,13 @@ rensa_gymnasiet_avgangna <- function(rad) {
       kommkod = as.character(kommkod),
       program_namn    = dplyr::coalesce(gymnasieprogram, "Okänt program"),
       inriktning_kort = dplyr::coalesce(inriktning, "Ingen inriktning"),
-      inriktning_namn = paste0(program_namn, " \u2013 ", inriktning_kort),
       avgb_typ_namn   = dplyr::coalesce(unname(.avgb_typ_klartext[avgb_typ]), avgb_typ,
                                         "Okänd betygstyp"),
+      # Korta etiketter för uppdelningarna.
+      grupp_kon      = dplyr::recode(kon, "Kvinna" = "Kvinnor", "Man" = "Män"),
+      grupp_bakgrund = utrinrfodd_namn,
+      grupp_nyanland = dplyr::recode(nyanland, "Nyanländ (högst 4 år i Sverige)" = "Nyanlända",
+                                     "Ej nyanländ" = "Ej nyanlända"),
       dplyr::across(c(avgangna, jmftal_summa, antal_med_jmftal), as.numeric)
     )
 }
@@ -69,13 +76,14 @@ hamta_gymnasiet_avgangna <- function(force = FALSE) {
   .avgangna_cache$df
 }
 
-# Summerar rader till en rad per (ar, kommkod, grupp) med examen,
-# studiebevis, betygspoäng och andelar. "grupp" blir "program" i
-# diagramfunktionernas mening. examen_grupp summeras bort men räknas ut.
-avgangna_summera <- function(d, grupp_kol = NULL) {
-  d <- dplyr::mutate(d, program = if (is.null(grupp_kol)) "Alla" else .data[[grupp_kol]])
+# Summerar till en rad per (ar, område, program, delgrupp) med examen,
+# studiebevis, betygspoäng och andelar. "program" och "delgrupp" tas från
+# angivna kolumner ("Alla" om NULL).
+avgangna_summera <- function(d, grupp_kol = NULL, delgrupp_kol = NULL) {
   d |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
+    dplyr::mutate(program  = if (is.null(grupp_kol)) "Alla" else .data[[grupp_kol]],
+                  delgrupp = if (is.null(delgrupp_kol)) "Alla" else .data[[delgrupp_kol]]) |>
+    dplyr::group_by(ar, kommkod, kommun, geo_niva, program, delgrupp) |>
     dplyr::summarise(
       examen      = sum(avgangna[examen_grupp == "Examen"], na.rm = TRUE),
       studiebevis = sum(avgangna[examen_grupp == "Studiebevis (minst 2500 poäng)"], na.rm = TRUE),
