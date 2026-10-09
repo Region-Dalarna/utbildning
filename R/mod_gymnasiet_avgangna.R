@@ -9,7 +9,8 @@
 #  Standardvy: gymnasieprogrammen i valt område (Hela Dalarna förvalt), klick
 #  på ett program visar dess inriktningar. Knappar under diagrammet delar upp
 #  på kön, bakgrund (inrikes/utrikes födda) eller nyanländ; huvudman är ett
-#  filter i sidopanelen.
+#  filter i sidopanelen. Antalsindikatorerna (Examen, Studiebevis) delas inte
+#  upp på nyanländ - gruppen är så liten att den försvinner bredvid de övriga.
 #
 #  Uppdelning och huvudmansfilter PER PROGRAM kräver granulariteten
 #  TypStudievagDetalj (beställd). Saknas den visar uppdelningarna i stället
@@ -21,12 +22,6 @@
 .KALLA_AVGANGNA <- kalla_rud("Gymnasiet – avgångna")
 .AVGANGNA_ANTAL_STAPLAR <- 25
 
-AVGANGNA_EXAMEN_FARGER <- c(
-  "Examen"                         = RD_PRIMARY,
-  "Studiebevis (minst 2500 poäng)" = rd_farg("rd-blue-light", "#8edded"),
-  "Övrig/okänd typ"                = "#b9c3ca"
-)
-
 # Färger för grupper utan egen palett (bakgrund, nyanländ, betygstyp).
 .avg_palett <- function(nivaer) {
   bas <- c(RD_PRIMARY, rd_farg("rd-blue-light", "#8edded"), rd_farg("rd-blue-deep", "#0074a2"),
@@ -36,10 +31,16 @@ AVGANGNA_EXAMEN_FARGER <- c(
 }
 
 avgangna_struktur <- list(
-  avgangna = list(label = "Avgångna", klar = TRUE, vy = "examen",
-                  amne = "Avgångna gymnasieelever", metrik = "avgangna",
-                  metrik_label = "Antal avgångna",
-                  beskrivning = "Antal elever som lämnat gymnasiet under året, efter typ av examen eller studiebevis."),
+  examen = list(label = "Examen", klar = TRUE, vy = "antal",
+                amne = "Avgångna med examen", metrik = "examen",
+                metrik_label = "Antal med examen",
+                beskrivning = paste(
+                  "Antal avgångna som fått examen: högskoleförberedande examen,",
+                  "yrkesexamen eller International Baccalaureate (IB).")),
+  studiebevis = list(label = "Studiebevis", klar = TRUE, vy = "antal",
+                     amne = "Avgångna med studiebevis (minst 2 500 poäng)", metrik = "studiebevis",
+                     metrik_label = "Antal med studiebevis",
+                     beskrivning = "Antal avgångna som fått studiebevis om minst 2 500 poäng."),
   andel_examen = list(label = "Andel med examen", klar = TRUE, vy = "andel",
                       amne = "Andel med examen", metrik = "andel_examen", vikt = "avgangna",
                       metrik_label = "Andel med examen (%)",
@@ -60,7 +61,8 @@ avgangna_struktur <- list(
                    metrik_label = "Antal avgångna",
                    beskrivning = "Vilken typ av betyg eller betygsdokument de avgångna har (SCB:s Avgb_Typ)."),
   # Beh: 1 = behörig, 0 = ej behörig, tomt = IB, Waldorf eller samlat
-  # betygsdokument (räknas inte med). Finns bara som totaler (TypBeh).
+  # betygsdokument (räknas inte med). Finns beh i detaljgranulariteten blir
+  # det en vanlig andelsvy per program, annars bara totaler (TypBeh).
   behorighet = list(label = "Behörighet", klar = TRUE, vy = "behorighet",
                     amne = "Andel med grundläggande behörighet till högskolan",
                     metrik = "andel_beh", vikt = "beh_underlag",
@@ -151,12 +153,22 @@ mod_gymnasiet_avgangna_server <- function(id) {
       req(input$indikator %in% names(avgangna_struktur))
       avgangna_struktur[[input$indikator]]
     })
-    vy <- reactive(valt_indikator()$vy)
+    # Vyn styr diagramtypen. Behörighet blir en vanlig andelsvy när beh finns
+    # i detaljgranulariteten.
+    vy <- reactive({
+      v <- valt_indikator()$vy
+      if (v == "behorighet" && har_beh_detalj()) "andel" else v
+    })
+    uppdelningar <- reactive({
+      if (vy() %in% c("betygstyp", "behorighet")) character(0)
+      else if (vy() == "antal") c("kon", "bakgrund")
+      else names(AVGANGNA_GRUPPER)
+    })
 
     # Uppdelning (knapparna under diagrammet): "total" eller en av AVGANGNA_GRUPPER.
     lage <- reactive({
       l <- input$uppdelning
-      if (is.null(l) || !l %in% names(AVGANGNA_GRUPPER) || vy() %in% c("betygstyp", "behorighet")) "total" else l
+      if (is.null(l) || !l %in% uppdelningar()) "total" else l
     })
     grupp <- reactive(if (lage() == "total") NULL else AVGANGNA_GRUPPER[[lage()]])
     huvudman <- reactive(if (is.null(input$huvudman)) "_alla_" else input$huvudman)
@@ -175,6 +187,8 @@ mod_gymnasiet_avgangna_server <- function(id) {
       dplyr::filter(hamta_gymnasiet_avgangna(), geografi == persp)
     })
     har_detalj <- reactive(AVGANGNA_DETALJ %in% persp_data()$granularitet)
+    har_beh_detalj <- reactive(har_detalj() && "beh" %in% names(persp_data()) &&
+                                 any(!is.na(gran(AVGANGNA_DETALJ)$beh)))
     gran <- function(g) dplyr::filter(persp_data(), granularitet == g)
 
     # Kan programdiagrammet visas med valda filter? Utan detaljgranulariteten
@@ -237,12 +251,16 @@ mod_gymnasiet_avgangna_server <- function(id) {
       else .avg_palett(persp_data()[[grupp()$kol]])
     })
 
-    # Valt år, valt område, de största programmen.
+    # Valt år, valt område, de största programmen (efter antal med examen
+    # resp. studiebevis i antalsvyerna, annars efter antal avgångna).
     prog_ar <- reactive({
       d <- dplyr::filter(prog_rader(), ar == as.integer(req(input$ar)), kommkod == omr_kod())
+      eg <- if (vy() == "antal") AVGANGNA_EXAMEN_GRUPP[[valt_indikator()$metrik]]
       storst <- d |>
         dplyr::group_by(p = .data[[prog_kol()]]) |>
-        dplyr::summarise(n = sum(avgangna, na.rm = TRUE), .groups = "drop") |>
+        dplyr::summarise(n = sum(avgangna[is.null(eg) | examen_grupp %in% eg], na.rm = TRUE),
+                         .groups = "drop") |>
+        dplyr::filter(n > 0) |>
         dplyr::slice_max(n, n = .AVGANGNA_ANTAL_STAPLAR, with_ties = FALSE) |>
         dplyr::pull(p)
       dplyr::filter(d, .data[[prog_kol()]] %in% storst)
@@ -273,14 +291,16 @@ mod_gymnasiet_avgangna_server <- function(id) {
                else "Klicka på en inriktning för att se utvecklingen över tid.")
       tillbaka <- if (!is.null(drill) && prog_vy())
         actionLink(ns("tillbaka"), "← Alla program", class = "rd-tillbaka")
-      knappar <- if (!vy() %in% c("betygstyp", "behorighet"))
+      knappar <- if (length(uppdelningar()) > 0) {
+        val <- c("Totalt" = "total", "Kön" = "kon", "Bakgrund" = "bakgrund", "Nyanländ" = "nyanland")
+        val <- val[val %in% c("total", uppdelningar())]
         div(class = "rd-kon-kontroll",
             shinyWidgets::radioGroupButtons(
-              inputId = ns("uppdelning"), label = NULL,
-              choices = c("Totalt" = "total", "Kön" = "kon", "Bakgrund" = "bakgrund",
-                          "Nyanländ" = "nyanland"),
-              selected = isolate(if (is.null(input$uppdelning)) "total" else input$uppdelning),
+              inputId = ns("uppdelning"), label = NULL, choices = val,
+              selected = isolate(if (is.null(input$uppdelning) || !input$uppdelning %in% val) "total"
+                                 else input$uppdelning),
               size = "sm"))
+      }
       fluidRow(
         column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), knappar, hint),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
@@ -313,12 +333,17 @@ mod_gymnasiet_avgangna_server <- function(id) {
                                               .avg_palett(fd$avgb_typ_namn), ind$metrik_label, input$ar,
                                               rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
         }
-        if (vy() == "examen") {
-          kat <- if (is.null(grupp())) "examen_grupp" else grupp()$kol
-          far <- if (is.null(grupp())) AVGANGNA_EXAMEN_FARGER else grupp_farger()
-          return(skapa_diagram_bar_fordelning(dplyr::mutate(d, program = .data[[pk]]), kat, "avgangna",
-                                              far, ind$metrik_label, input$ar,
-                                              rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
+        if (vy() == "antal") {
+          if (is.null(grupp()))
+            return(skapa_diagram_bar(avgangna_summera(d, pk), ind$metrik, ind$metrik_label, input$ar,
+                                     rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
+          # Program x grupp: grupperade staplar per program.
+          s <- avgangna_summera(d, pk, grupp()$kol) |>
+            dplyr::mutate(geo_niva = "kommun", kommun = program, kommkod = program, program = delgrupp)
+          return(skapa_diagram_andel_omrade_kon(s, ind$metrik, ind$metrik, ind$metrik_label, input$ar,
+                                                vald_kommkod = program_vald(), grupp_farger = grupp_farger(),
+                                                rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA,
+                                                enhet = "", summa = TRUE))
         }
         enh <- if (is.null(ind$enhet)) " %" else ind$enhet
         if (is.null(grupp())) {
@@ -347,10 +372,16 @@ mod_gymnasiet_avgangna_server <- function(id) {
                                             ind$metrik_label, input$ar, rubrik = rub, underrubrik = sub,
                                             kalla = .KALLA_AVGANGNA))
       }
-      if (vy() == "examen") {
-        return(skapa_diagram_bar_fordelning(dplyr::mutate(d, program = .data[[kol]]), "examen_grupp",
-                                            "avgangna", AVGANGNA_EXAMEN_FARGER, ind$metrik_label, input$ar,
-                                            rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
+      if (vy() == "antal") {
+        if (is.null(grupp()))
+          return(skapa_diagram_bar(avgangna_summera(d, kol), ind$metrik, ind$metrik_label, input$ar,
+                                   rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
+        s <- avgangna_summera(d, NULL, kol) |>
+          dplyr::mutate(geo_niva = "kommun", kommun = omr_namn(), kommkod = omr_kod(), program = delgrupp)
+        return(skapa_diagram_andel_omrade_kon(s, ind$metrik, ind$metrik, ind$metrik_label, input$ar,
+                                              grupp_farger = grupp_farger(),
+                                              rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA,
+                                              enhet = "", summa = TRUE))
       }
       skapa_diagram_bar_andel(avgangna_summera(d, kol), ind$metrik, ind$vikt, ind$metrik_label, input$ar,
                               rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA,
@@ -414,8 +445,8 @@ mod_gymnasiet_avgangna_server <- function(id) {
         d <- avgangna_summera(trend_rader(omr_kod(), med_grupp = TRUE), NULL, grupp()$kol) |>
           dplyr::mutate(program = delgrupp)
         validate(need(nrow(d) > 0, "Inga data."))
-        if (vy() == "examen")
-          return(skapa_diagram_trend_andel_kon(d, "avgangna", "avgangna", ind$metrik_label,
+        if (vy() == "antal")
+          return(skapa_diagram_trend_andel_kon(d, ind$metrik, ind$metrik, ind$metrik_label,
                                                rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA,
                                                enhet = "", summa = TRUE, grupp_farger = grupp_farger()))
         return(skapa_diagram_trend_andel_kon(d, ind$metrik, ind$vikt, ind$metrik_label,
@@ -428,8 +459,8 @@ mod_gymnasiet_avgangna_server <- function(id) {
       koder <- unique(c(omr_kod(), "20", "00"))
       d <- avgangna_summera(trend_rader(koder))
       validate(need(nrow(d) > 0, "Inga data."))
-      if (vy() == "examen")
-        return(skapa_diagram_trend(dplyr::filter(d, kommkod == omr_kod()), "avgangna", ind$metrik_label,
+      if (vy() == "antal")
+        return(skapa_diagram_trend(dplyr::filter(d, kommkod == omr_kod()), ind$metrik, ind$metrik_label,
                                    rubrik = rub, underrubrik = sub, kalla = .KALLA_AVGANGNA))
       d <- dplyr::mutate(d, serie = factor(serie_namn(kommkod), levels = unique(serie_namn(koder))),
                          varde = .data[[ind$metrik]], underlag = .data[[ind$vikt]])
@@ -442,7 +473,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
     output$notiser <- renderUI({
       n <- "Examen omfattar högskoleförberedande examen, yrkesexamen och International Baccalaureate (IB)."
       if (vy() == "behorighet") {
-        n <- c(n, paste("Behörighet finns inte per program, huvudman eller grupp i data -",
+        n <- c(n, paste("Behörighet finns inte per program, huvudman eller grupp i data än -",
                         "diagrammen visar valt område jämfört med Dalarna och riket.",
                         "Elever som läser IB eller Waldorf, eller som tagit ut samlat",
                         "betygsdokument, saknar uppgift och räknas inte med."))
@@ -450,6 +481,9 @@ mod_gymnasiet_avgangna_server <- function(id) {
         n <- c(n, paste("Uppdelning per program med valda inställningar finns inte i data än.",
                         "Diagrammet visar därför fördelningen för hela området."))
       }
+      if (valt_indikator()$vy == "behorighet" && vy() != "behorighet")
+        n <- c(n, paste("Elever som läser IB eller Waldorf, eller som tagit ut samlat",
+                        "betygsdokument, saknar uppgift om behörighet och räknas inte med."))
       if (identical(lage(), "nyanland"))
         n <- c(n, paste("Nyanländ = högst 4 år i Sverige, räknat från senaste invandringsår.",
                         "Även svenskfödda som återinvandrat kan ingå."))

@@ -10,7 +10,7 @@
 #    Typ (totaler), TypKon, TypBakgrund, TypNyanland, TypHuvudman,
 #    TypStudievag (program/inriktning), TypBetygstyp (Avgb_Typ), TypBeh.
 #  TypStudievagDetalj (beställd): program/inriktning kombinerat med kön,
-#    bakgrund, nyanländ, huvudman och betygstyp. Finns den används den för
+#    bakgrund, nyanländ, huvudman, betygstyp och beh. Finns den används den för
 #    programdiagrammet så att det kan delas upp och filtreras på huvudman.
 #  avgangna = unika elever. Inom EN granularitet är summering över alla
 #  dimensioner säker (en elev har ett värde av varje).
@@ -76,17 +76,24 @@ hamta_gymnasiet_avgangna <- function(force = FALSE) {
   .avgangna_cache$df
 }
 
+# examen_grupp för antalsindikatorerna Examen och Studiebevis.
+AVGANGNA_EXAMEN_GRUPP <- c(examen = "Examen", studiebevis = "Studiebevis (minst 2500 poäng)")
+
 # Summerar till en rad per (ar, område, program, delgrupp) med examen,
-# studiebevis, betygspoäng och andelar. "program" och "delgrupp" tas från
-# angivna kolumner ("Alla" om NULL).
+# studiebevis, betygspoäng, behörighet och andelar. "program" och "delgrupp"
+# tas från angivna kolumner ("Alla" om NULL). Behörighet (beh: 1 = behörig,
+# 0 = ej behörig, tomt räknas inte) blir NA när raderna saknar beh.
 avgangna_summera <- function(d, grupp_kol = NULL, delgrupp_kol = NULL) {
+  if (!"beh" %in% names(d)) d$beh <- NA
   d |>
     dplyr::mutate(program  = if (is.null(grupp_kol)) "Alla" else .data[[grupp_kol]],
                   delgrupp = if (is.null(delgrupp_kol)) "Alla" else .data[[delgrupp_kol]]) |>
     dplyr::group_by(ar, kommkod, kommun, geo_niva, program, delgrupp) |>
     dplyr::summarise(
-      examen      = sum(avgangna[examen_grupp == "Examen"], na.rm = TRUE),
-      studiebevis = sum(avgangna[examen_grupp == "Studiebevis (minst 2500 poäng)"], na.rm = TRUE),
+      examen      = sum(avgangna[examen_grupp == AVGANGNA_EXAMEN_GRUPP[["examen"]]], na.rm = TRUE),
+      studiebevis = sum(avgangna[examen_grupp == AVGANGNA_EXAMEN_GRUPP[["studiebevis"]]], na.rm = TRUE),
+      behoriga     = sum(avgangna[beh %in% 1], na.rm = TRUE),
+      beh_underlag = sum(avgangna[beh %in% c(0, 1)], na.rm = TRUE),
       avgangna    = sum(avgangna, na.rm = TRUE),
       jmftal_summa     = sum(jmftal_summa, na.rm = TRUE),
       antal_med_jmftal = sum(antal_med_jmftal, na.rm = TRUE),
@@ -94,6 +101,7 @@ avgangna_summera <- function(d, grupp_kol = NULL, delgrupp_kol = NULL) {
     dplyr::mutate(
       andel_examen      = dplyr::if_else(avgangna > 0, 100 * examen / avgangna, NA_real_),
       andel_studiebevis = dplyr::if_else(avgangna > 0, 100 * studiebevis / avgangna, NA_real_),
+      andel_beh = dplyr::if_else(beh_underlag > 0, 100 * behoriga / beh_underlag, NA_real_),
       betyg = dplyr::if_else(antal_med_jmftal > 0, jmftal_summa / antal_med_jmftal, NA_real_)
     )
 }
