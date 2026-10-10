@@ -241,7 +241,9 @@ mod_gymnasiet_server <- function(id) {
     ns <- session$ns
 
     output$indikator_ui <- renderUI({
-      omr <- gymnasiet_struktur[[ req(input$omrade) ]]
+      # Avgångna har egen modul och finns inte i gymnasiet_struktur.
+      req(input$omrade %in% names(gymnasiet_struktur))
+      omr <- gymnasiet_struktur[[input$omrade]]
       ch   <- .choices_fran_lista(omr$indikatorer)
       # value -> beskrivning, bara för indikatorer som har en beskrivning satt.
       # OBS: radioGroupButtons() bygger sina <button>-taggar lat (via

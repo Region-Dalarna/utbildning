@@ -604,8 +604,10 @@ skapa_diagram_andel_omrade_kon <- function(df, andel_kol, vikt_kol, metrik_label
   g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = omrade, fill = fyll, group = kon)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id, alpha = alfa, colour = kant),
-      # reverse = TRUE: första gruppen överst i varje rad, samma ordning som legenden
-      position = ggplot2::position_dodge(width = 0.8, reverse = TRUE), width = 0.75,
+      # reverse = TRUE: första gruppen överst i varje rad, samma ordning som legenden.
+      # preserve = "single": lika breda staplar även där en grupp saknas.
+      position = ggplot2::position_dodge2(preserve = "single", reverse = TRUE, padding = 0.1),
+      width = 0.75,
       linetype = "22", linewidth = 0.35) +
     ggplot2::scale_alpha_identity() +
     ggplot2::scale_colour_identity() +
@@ -677,6 +679,9 @@ skapa_diagram_trend_andel_kon <- function(df, andel_kol, vikt_kol, metrik_label,
     ggplot2::theme(legend.position    = "top",
                    panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
 
+  # Många grupper: legenden i två kolumner, så att den inte klipps i kanten.
+  if (length(farger) > 3) g <- g + ggplot2::guides(color = ggplot2::guide_legend(ncol = 2, byrow = TRUE))
+
   .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
 }
 
@@ -735,7 +740,8 @@ skapa_diagram_bar_fordelning <- function(df, kategori_kol, metrik, farger, metri
                   caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top") +
-    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE))
+    # Två kolumner, så att långa kategorinamn inte klipps i kanten.
+    ggplot2::guides(fill = ggplot2::guide_legend(ncol = 2, byrow = TRUE))
 
   .girafe_std(g, width_svg = 6.8, height_svg = max(4, dplyr::n_distinct(d$program) * 0.35 + 2),
               selection = TRUE)
@@ -934,7 +940,7 @@ skapa_diagram_etablering_bar <- function(df, metrik, metrik_label,
     g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = namn, fill = ar_etikett)) +
       ggiraph::geom_col_interactive(
         ggplot2::aes(tooltip = tooltip, data_id = paste(namn, ar_etikett)),
-        position = ggplot2::position_dodge(width = 0.8), width = 0.72) +
+        position = ggplot2::position_dodge2(preserve = "single", padding = 0.1), width = 0.72) +
       ggplot2::scale_fill_manual(values = ANTAL_AR_FARGER, name = "År efter examen") +
       ggplot2::scale_x_continuous(
         labels = scales::percent_format(accuracy = 1),

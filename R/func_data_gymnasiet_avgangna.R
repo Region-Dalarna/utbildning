@@ -25,8 +25,7 @@ AVGANGNA_DETALJ <- "TypStudievagDetalj"
 # kolumnen med gruppens etikett.
 AVGANGNA_GRUPPER <- list(
   kon      = list(label = "Kön",      granularitet = "TypKon",      kol = "grupp_kon"),
-  bakgrund = list(label = "Bakgrund", granularitet = "TypBakgrund", kol = "grupp_bakgrund"),
-  nyanland = list(label = "Nyanländ", granularitet = "TypNyanland", kol = "grupp_nyanland")
+  bakgrund = list(label = "Bakgrund", granularitet = "TypBakgrund", kol = "grupp_bakgrund")
 )
 
 # Avgb_Typ (typ av betyg/betygsdokument) enligt SCB:s värdemängd.
@@ -55,7 +54,7 @@ rensa_gymnasiet_avgangna <- function(rad) {
       program_namn    = dplyr::coalesce(gymnasieprogram, "Okänt program"),
       inriktning_kort = dplyr::coalesce(inriktning, "Ingen inriktning"),
       avgb_typ_namn   = dplyr::coalesce(unname(.avgb_typ_klartext[avgb_typ]), avgb_typ,
-                                        "Okänd betygstyp"),
+                                        "Okänd examenstyp"),
       # Korta etiketter för uppdelningarna.
       grupp_kon      = dplyr::recode(kon, "Kvinna" = "Kvinnor", "Man" = "Män"),
       grupp_bakgrund = utrinrfodd_namn,

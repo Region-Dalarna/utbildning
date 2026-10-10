@@ -8,9 +8,8 @@
 #
 #  Standardvy: gymnasieprogrammen i valt område (Hela Dalarna förvalt), klick
 #  på ett program visar dess inriktningar. Knappar under diagrammet delar upp
-#  på kön, bakgrund (inrikes/utrikes födda) eller nyanländ; huvudman är ett
-#  filter i sidopanelen. Antalsindikatorerna (Examen, Studiebevis) delas inte
-#  upp på nyanländ - gruppen är så liten att den försvinner bredvid de övriga.
+#  på kön eller bakgrund (inrikes/utrikes födda); huvudman är ett filter i
+#  sidopanelen. Nyanlända är för få för en egen uppdelning (oftast dolda).
 #
 #  Uppdelning och huvudmansfilter PER PROGRAM kräver granulariteten
 #  TypStudievagDetalj (beställd). Saknas den visar uppdelningarna i stället
@@ -22,7 +21,7 @@
 .KALLA_AVGANGNA <- kalla_rud("Gymnasiet – avgångna")
 .AVGANGNA_ANTAL_STAPLAR <- 25
 
-# Färger för grupper utan egen palett (bakgrund, nyanländ, betygstyp).
+# Färger för grupper utan egen palett (bakgrund, examenstyp).
 .avg_palett <- function(nivaer) {
   bas <- c(RD_PRIMARY, rd_farg("rd-blue-light", "#8edded"), rd_farg("rd-blue-deep", "#0074a2"),
            rd_farg("rd-accent", "#54a1bd"), "#b9c3ca", "#7d8a93", "#c9d6dd", "#3c5a6b", "#e2a855")
@@ -56,10 +55,11 @@ avgangna_struktur <- list(
                amne = "Genomsnittlig betygspoäng", metrik = "betyg", vikt = "antal_med_jmftal",
                enhet = "", metrik_label = "Genomsnittlig betygspoäng",
                beskrivning = "Genomsnittlig betygspoäng (jämförelsetal) bland avgångna med betygspoäng."),
-  betygstyp = list(label = "Betygstyp", klar = TRUE, vy = "betygstyp",
-                   amne = "Avgångna efter typ av betyg", metrik = "avgangna",
+  betygstyp = list(label = "Examenstyp", klar = TRUE, vy = "betygstyp",
+                   amne = "Avgångna efter examenstyp", metrik = "avgangna",
                    metrik_label = "Antal avgångna",
-                   beskrivning = "Vilken typ av betyg eller betygsdokument de avgångna har (SCB:s Avgb_Typ)."),
+                   beskrivning = paste("Vilken typ av examen, studiebevis eller annat betygsdokument",
+                                       "de avgångna har (SCB:s variabel Avgb_Typ).")),
   # Beh: 1 = behörig, 0 = ej behörig, tomt = IB, Waldorf eller samlat
   # betygsdokument (räknas inte med). Finns beh i detaljgranulariteten blir
   # det en vanlig andelsvy per program, annars bara totaler (TypBeh).
@@ -161,7 +161,6 @@ mod_gymnasiet_avgangna_server <- function(id) {
     })
     uppdelningar <- reactive({
       if (vy() %in% c("betygstyp", "behorighet")) character(0)
-      else if (vy() == "antal") c("kon", "bakgrund")
       else names(AVGANGNA_GRUPPER)
     })
 
@@ -292,7 +291,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
       tillbaka <- if (!is.null(drill) && prog_vy())
         actionLink(ns("tillbaka"), "← Alla program", class = "rd-tillbaka")
       knappar <- if (length(uppdelningar()) > 0) {
-        val <- c("Totalt" = "total", "Kön" = "kon", "Bakgrund" = "bakgrund", "Nyanländ" = "nyanland")
+        val <- c("Totalt" = "total", "Kön" = "kon", "Bakgrund" = "bakgrund")
         val <- val[val %in% c("total", uppdelningar())]
         div(class = "rd-kon-kontroll",
             shinyWidgets::radioGroupButtons(
@@ -428,7 +427,7 @@ mod_gymnasiet_avgangna_server <- function(id) {
                                        kalla = .KALLA_AVGANGNA))
       }
 
-      # Betygstyp: andel per betygstyp över tid i valt område.
+      # Examenstyp (Avgb_Typ): andel per typ över tid i valt område.
       if (vy() == "betygstyp") {
         d <- trend_rader(omr_kod()) |>
           dplyr::group_by(ar, program = avgb_typ_namn) |>
@@ -484,9 +483,6 @@ mod_gymnasiet_avgangna_server <- function(id) {
       if (valt_indikator()$vy == "behorighet" && vy() != "behorighet")
         n <- c(n, paste("Elever som läser IB eller Waldorf, eller som tagit ut samlat",
                         "betygsdokument, saknar uppgift om behörighet och räknas inte med."))
-      if (identical(lage(), "nyanland"))
-        n <- c(n, paste("Nyanländ = högst 4 år i Sverige, räknat från senaste invandringsår.",
-                        "Även svenskfödda som återinvandrat kan ingå."))
       if (prog_vy())
         n <- c(n, paste("Inriktning kommer från studievägskoden. Varianter som idrottsutbildning,",
                         "lärling och riksrekryterande ingår i sitt basprogram. Vissa koder saknar",
