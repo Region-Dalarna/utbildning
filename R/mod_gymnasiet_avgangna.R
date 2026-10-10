@@ -413,8 +413,13 @@ mod_gymnasiet_avgangna_server <- function(id) {
 
     output$d_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      fokus <- if (!is.null(program_vald())) program_vald() else program_drill()
+      # Vald inriktning visas med sitt program: "Program: Inriktning".
+      fokus <- if (!is.null(program_vald()) && !is.null(program_drill()))
+        paste0(program_drill(), ": ", program_vald())
+      else if (!is.null(program_vald())) program_vald() else program_drill()
       rub <- paste0(ind$amne, " – ", if (is.null(fokus)) "utveckling över tid" else fokus)
+      # Långa rubriker bryts så att de inte klipps i det smala diagrammet.
+      rub <- paste(strwrap(rub, width = 55), collapse = "\n")
       sub <- underrubrik()
 
       if (vy() == "behorighet") {
