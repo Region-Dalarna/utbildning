@@ -920,9 +920,7 @@ mod_gymnasiet_server <- function(id) {
       df <- data_bas()
       validate(need(nrow(df) > 0, "Inga data."))
       skapa_diagram_programtyp(df, ind$metrik, ind$metrik_label, program_vald(),
-                               rubrik = paste0(ind$amne, " – andel efter programtyp",
-                                               if (!is.null(program_vald()))
-                                                 paste0("\n", program_vald(), " markerat")),
+                               rubrik = paste0(ind$amne, " – andel efter programtyp"),
                                underrubrik = filter_underrubrik(),
                                kalla = ind$kalla)
     })

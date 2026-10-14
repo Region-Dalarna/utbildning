@@ -269,20 +269,32 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
 # Staplarna ritas från ANDEL (y = andel) som summerar till 1 per år, så att
 # stapelhöjd och hover-värde alltid är exakt samma siffra. Ingen etikett –
 # informationen finns i hover.
-.rita_programtyp <- function(d, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
-  farger <- programtyp_farger(d$programtyp)
+# d har kolumnen fyll (teckenförklaringens namn, i önskad ordning) och
+# markerad. Nedtonade delar får en blekare färg i stället för genomskinlighet,
+# så att teckenförklaringen visar samma färg som staplarna.
+.blek_farg <- function(farg, styrka = 0.3) {
+  m <- grDevices::col2rgb(farg) / 255
+  grDevices::rgb(t(m * styrka + (1 - styrka)))
+}
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = factor(ar), y = andel, fill = programtyp,
-                                       alpha = markerad, group = grp)) +
+.rita_programtyp <- function(d, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  typ_farg <- programtyp_farger(d$programtyp)
+  fyll_farg <- d |>
+    dplyr::distinct(fyll, programtyp, markerad) |>
+    dplyr::mutate(farg = ifelse(markerad, typ_farg[programtyp], .blek_farg(typ_farg[programtyp])))
+  farger <- stats::setNames(fyll_farg$farg, fyll_farg$fyll)
+  # En rad räcker oftast; långa namn (valt program) får två rader.
+  rader <- if (sum(nchar(names(farger))) > 60) 2 else 1
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = factor(ar), y = andel, fill = fyll, group = grp)) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = paste0(grp, "_", ar)),
       position = "stack", width = 0.8) +
-    ggplot2::scale_fill_manual(values = farger, name = NULL, labels = .programtyp_kort) +
-    ggplot2::scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.3), guide = "none") +
+    ggplot2::scale_fill_manual(values = farger, breaks = levels(d$fyll), name = NULL) +
     ggplot2::scale_x_discrete(breaks = as.character(.ar_breaks(d$ar))) +
     ggplot2::scale_y_continuous(labels = scales::percent,
                                 expand = ggplot2::expansion(mult = c(0, 0.02))) +
-    ggplot2::guides(fill = ggplot2::guide_legend(override.aes = list(alpha = 1), nrow = 1)) +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = rader, byrow = TRUE)) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
@@ -298,11 +310,14 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
 
 # program_sel = NULL  -> översikt, andel per programtyp.
 # program_sel angivet -> hela 100%-stapeln, valt program markerat, resten nedtonat.
-# Alla andelar i tooltip är andelar av helheten ("av alla antagna" o.s.v.).
+# Alla andelar är andelar av helheten - det står en gång i underrubriken
+# ("andel av alla antagna" o.s.v.), inte i varje tooltip.
 skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NULL,
                                      rubrik = NULL, underrubrik = NULL, kalla = NULL) {
-  av_alla <- paste0(" av alla ", tolower(sub("^Antal ", "", metrik_label)))
+  underrubrik <- paste0(underrubrik, " \u00b7 andel av alla ",
+                        tolower(sub("^Antal ", "", metrik_label)))
   pct <- function(x) scales::percent(x, accuracy = 1)
+  tt  <- function(namn, ar, andel) paste0("<b>", namn, " ", ar, ":</b> ", pct(andel))
   df <- dplyr::filter(df, !is.na(programtyp))
   df$programtyp <- trimws(as.character(df$programtyp))
   df <- dplyr::filter(
@@ -325,7 +340,9 @@ skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NUL
         andel    = dplyr::if_else(ar_total > 0, antal / ar_total, 0),
         markerad = TRUE,
         grp      = as.character(programtyp),
-        tooltip  = paste0("<b>", programtyp, "</b><br/>", ar, ": ", pct(andel), av_alla))
+        fyll     = factor(.programtyp_kort(programtyp),
+                          levels = .programtyp_kort(sort(unique(programtyp)))),
+        tooltip  = tt(programtyp, ar, andel))
     return(.rita_programtyp(d, rubrik = rubrik, underrubrik = underrubrik, kalla = kalla))
   }
 
@@ -360,8 +377,17 @@ skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NUL
   tot <- combined |>
     dplyr::group_by(ar) |>
     dplyr::summarise(ar_total = sum(antal), .groups = "drop")
-  # Valda programtypen: tooltip för båda delarna anger även hela typens andel,
-  # så att det framgår att den nedtonade delen är typen utan valt program.
+  # Teckenförklaring: valt program först, sedan övriga i programtypsordning.
+  # Resten av valda programtypen heter "Övr. <typ>" (kort) resp.
+  # "Övriga <typ>" (tooltip), så att det framgår att valt program inte ingår.
+  typer <- sort(unique(combined$programtyp))
+  ovr_kort <- paste("Övr.", tolower(.programtyp_kort(sel_typ)))
+  ovr_lang <- switch(sel_typ,
+                     "Högskoleförberedande program" = "Övriga högskoleförb. program",
+                     "Yrkesprogram"                 = "Övriga yrkesprogram",
+                     "Introduktionsprogram"         = "Övriga introduktionsprogram",
+                     paste("Övriga inom", tolower(sel_typ)))
+  fyll_niv <- c(program_sel, ifelse(typer == sel_typ, ovr_kort, .programtyp_kort(typer)))
   d <- combined |>
     dplyr::left_join(tot, by = "ar") |>
     dplyr::group_by(ar, programtyp) |>
@@ -369,12 +395,15 @@ skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NUL
     dplyr::ungroup() |>
     dplyr::mutate(
       andel = dplyr::if_else(ar_total > 0, antal / ar_total, 0),
-      typ_rad = paste0("<br/>", programtyp, " totalt: ", pct(typ_andel), av_alla),
+      fyll  = factor(dplyr::case_when(markerad ~ program_sel,
+                                      programtyp == sel_typ ~ ovr_kort,
+                                      TRUE ~ .programtyp_kort(programtyp)),
+                     levels = fyll_niv),
       tooltip = dplyr::case_when(
-        markerad ~ paste0("<b>", program_sel, "</b><br/>", ar, ": ", pct(andel), av_alla, typ_rad),
-        programtyp == sel_typ ~ paste0("<b>", programtyp, " utom ", program_sel, "</b><br/>", ar, ": ",
-                                       pct(andel), av_alla, typ_rad),
-        TRUE ~ paste0("<b>", programtyp, "</b><br/>", ar, ": ", pct(andel), av_alla)))
+        markerad ~ paste0(tt(program_sel, ar, andel), "<br/>",
+                          .programtyp_kort(programtyp), " totalt: ", pct(typ_andel)),
+        programtyp == sel_typ ~ tt(ovr_lang, ar, andel),
+        TRUE ~ tt(programtyp, ar, andel)))
 
   .rita_programtyp(d, rubrik = rubrik, underrubrik = underrubrik, kalla = kalla)
 }
