@@ -199,15 +199,24 @@ mod_gymnasiet_ui <- function(id) {
           selected = "kommun"
         ),
         shinyWidgets::pickerInput(
-          inputId = ns("geo_val"), label = "Område", choices = NULL,
-          options = shinyWidgets::pickerOptions(liveSearch = TRUE)
+          inputId = ns("geo_val"), label = "Område", choices = NULL, multiple = TRUE,
+          options = shinyWidgets::pickerOptions(liveSearch = TRUE, selectedTextFormat = "count > 3",
+                                                countSelectedText = "{0} områden valda")
         ),
+        tags$p(class = "rd-hint", "Välj flera i listan, eller Ctrl-klicka (Cmd på Mac) i kartan."),
         uiOutput(ns("org_ui")),
         uiOutput(ns("ar_ui")),
 
         tags$hr(),
         uiOutput(ns("karta_rubrik")),
         ggiraph::girafeOutput(ns("karta"), height = "320px"),
+        # Talar om för servern om kartklicket gjordes med Ctrl/Cmd nedtryckt
+        # (fångas före ggiraphs egen klickhantering).
+        tags$script(HTML(sprintf(
+          "document.addEventListener('click', function(e) {
+             if (e.target.closest && e.target.closest('#%s'))
+               Shiny.setInputValue('%s', e.ctrlKey || e.metaKey, {priority: 'event'});
+           }, true);", ns("karta"), ns("karta_ctrl")))),
 
         tags$hr(),
         div(
@@ -382,13 +391,13 @@ mod_gymnasiet_server <- function(id) {
     etablering_dalarna <- reactive({
       req(valt_vy() == "etablering")
       d <- aktuell_data() |> dplyr::filter(prog_niva == "program")
-      gv  <- input$geo_val
+      gv  <- geo_vald()
 
-      if (is.null(gv) || gv == "_alla_") {
+      if (identical(gv, "_alla_")) {
         d_lan <- dplyr::filter(d, geo_niva == "lan")
         d <- if (nrow(d_lan) > 0) d_lan else dplyr::filter(d, geo_niva == "kommun")
       } else if (input$geo_niva == "kommun") {
-        d <- dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+        d <- dplyr::filter(d, geo_niva == "kommun", kommkod %in% gv)
       } else {
         d <- dplyr::filter(d, geo_niva == "kommun", samverkan_i(samverkansomrade, gv))
       }
@@ -497,23 +506,69 @@ mod_gymnasiet_server <- function(id) {
       }
     })
 
+    # ---- Områdesval: ett eller flera områden ---------------------------------
+    # geo_vald() = "_alla_" (Hela Dalarna) eller en vektor med kommunkoder
+    # resp. samverkansområden. Flera kommuner räknas som ett samverkansområde:
+    # kommunraderna summeras/viktas ihop.
+    geo_vald_rv <- reactiveVal("_alla_")
+    geo_vald <- reactive(geo_vald_rv())
+
     observeEvent(input$geo_niva, {
       val <- if (input$geo_niva == "kommun") geo_val_kommun
              else c(stats::setNames(GYSAM_HELA, GYSAM_HELA), geo_val_samverkan)   # Hela Gysam överst
+      geo_vald_rv("_alla_")
+      karta_forra(character(0))      # kartan ritas om utan urval
       shinyWidgets::updatePickerInput(
         session, "geo_val",
         choices = c("Hela Dalarna" = "_alla_", val), selected = "_alla_")
     }, ignoreInit = FALSE)
 
-    # Kartklick styr Område-valet. Klick på redan vald yta avmarkerar
-    # (ggiraph skickar tomt urval) -> tillbaka till Hela Dalarna.
-    # Kartan ritas inte om på geo_val, så ingen återställningsloop uppstår.
+    # Kartans markering följer valet (ggiraph: meddelandet <id>_set).
+    karta_ids <- function(gv) {
+      if (identical(gv, "_alla_")) character(0)
+      else if (identical(input$geo_niva, "samverkansomrade")) samverkan_expandera(gv)
+      else gv
+    }
+    karta_forra <- reactiveVal(character(0))   # kartans senast kända urval
+    synka_karta <- function(gv) {
+      karta_forra(karta_ids(gv))
+      session$sendCustomMessage(paste0(ns("karta"), "_set"), as.list(karta_ids(gv)))
+    }
+
+    # Listrutan: "Hela Dalarna" utesluter övriga val. Väljs ett område när
+    # Hela Dalarna är valt tas Hela Dalarna bort, och tvärtom.
+    observeEvent(input$geo_val, {
+      sel   <- input$geo_val
+      forra <- geo_vald_rv()
+      ny <- if (length(sel) == 0) "_alla_"
+            else if ("_alla_" %in% sel && length(sel) > 1)
+              (if ("_alla_" %in% forra) setdiff(sel, "_alla_") else "_alla_")
+            else sel
+      if (!setequal(ny, sel)) shinyWidgets::updatePickerInput(session, "geo_val", selected = ny)
+      if (!setequal(ny, forra)) geo_vald_rv(ny)
+      synka_karta(ny)
+    }, ignoreNULL = FALSE, ignoreInit = TRUE)
+
+    # Kartklick: vanligt klick väljer bara det området (klick på enda valda
+    # området -> Hela Dalarna), Ctrl/Cmd-klick lägger till eller tar bort.
+    # Kartan har urvalstypen "multiple"; det klickade området är det som
+    # skiljer nytt urval från förra. Servern synkar sedan kartan till valet.
     observeEvent(input$karta_selected, {
-      sel <- input$karta_selected
-      ny  <- if (length(sel) >= 1) sel else "_alla_"
-      if (!identical(ny, input$geo_val)) {
-        shinyWidgets::updatePickerInput(session, "geo_val", selected = ny)
-      }
+      sel   <- if (is.null(input$karta_selected)) character(0) else input$karta_selected
+      forra <- karta_forra()
+      karta_forra(sel)
+      aktuell <- geo_vald_rv()
+      if (setequal(sel, karta_ids(aktuell))) return()        # serverns egen synkning
+      klickad <- union(setdiff(sel, forra), setdiff(forra, sel))
+      if (length(klickad) != 1) return()
+      valda <- setdiff(aktuell, "_alla_")
+      ny <- if (isTRUE(isolate(input$karta_ctrl))) {
+        if (klickad %in% valda) setdiff(valda, klickad) else c(valda, klickad)
+      } else if (identical(valda, klickad)) character(0) else klickad
+      if (length(ny) == 0) ny <- "_alla_"
+      shinyWidgets::updatePickerInput(session, "geo_val", selected = ny)
+      geo_vald_rv(ny)
+      synka_karta(ny)
     }, ignoreNULL = FALSE, ignoreInit = TRUE)
 
     valt_indikator <- reactive({
@@ -532,11 +587,12 @@ mod_gymnasiet_server <- function(id) {
     kon_lage <- reactive({ if (is.null(input$kon_lage)) "kon" else input$kon_lage })
 
     geo_label <- reactive({
-      gv <- input$geo_val
-      if (is.null(gv) || gv == "_alla_") return("Dalarna")
-      if (input$geo_niva == "kommun")
-        dalarna_kommuner$kommun[match(gv, dalarna_kommuner$kommkod)]
-      else gv
+      gv <- geo_vald()
+      if (identical(gv, "_alla_")) return("Dalarna")
+      namn <- if (input$geo_niva == "kommun")
+        dalarna_kommuner$kommun[match(gv, dalarna_kommuner$kommkod)] else gv
+      if (length(namn) <= 3) paste(namn, collapse = ", ")
+      else paste(length(namn), if (input$geo_niva == "kommun") "kommuner" else "samverkansområden")
     })
 
     # Driftsformsfilter, delad logik för alla statistikområden. Om en
@@ -559,25 +615,27 @@ mod_gymnasiet_server <- function(id) {
 
     data_bas <- reactive({
       d  <- aktuell_data()
-      gv <- req(input$geo_val)
+      gv <- geo_vald()
 
       if ("geo_niva" %in% names(d)) {
         # Datan har egna färdigviktade läns-/kommunrader (elever). Använd
         # länsraden direkt för "Hela Dalarna" i stället för att vikta ihop
         # kommunraderna själva – ger Skolverkets egna, redan korrekt
         # viktade tal (samma mönster som genomströmning/etablering).
-        if (gv == "_alla_") {
+        if (identical(gv, "_alla_")) {
           d <- dplyr::filter(d, geo_niva == "lan")
         } else if (input$geo_niva == "kommun") {
-          d <- dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+          # En kommun: dess färdiga rader. Flera: kommunraderna viktas ihop
+          # nedströms, som för samverkansområden.
+          d <- dplyr::filter(d, geo_niva == "kommun", kommkod %in% gv)
         } else {
           # Samverkansområde: ingen färdig aggregatrad finns på den nivån,
           # så där vaktar vi ihop kommunraderna som tillhör området.
           d <- dplyr::filter(d, geo_niva == "kommun", samverkan_i(samverkansomrade, gv))
         }
-      } else if (gv != "_alla_") {
+      } else if (!identical(gv, "_alla_")) {
         d <- if (input$geo_niva == "kommun")
-          dplyr::filter(d, kommkod == gv) else dplyr::filter(d, samverkan_i(samverkansomrade, gv))
+          dplyr::filter(d, kommkod %in% gv) else dplyr::filter(d, samverkan_i(samverkansomrade, gv))
       }
 
       d <- filtrera_driftsform(d, input$organisationstyp)
@@ -610,19 +668,20 @@ mod_gymnasiet_server <- function(id) {
     genomstromning_dalarna <- reactive({
       req(valt_vy() == "genomstromning")
       d   <- aktuell_data()
-      gv  <- input$geo_val
+      gv  <- geo_vald()
       org <- input$organisationstyp
       org_filter <- if (!is.null(org) && org != "_alla_") org else "Alla"
 
-      if (is.null(gv) || gv == "_alla_") {
+      if (identical(gv, "_alla_")) {
         # Hela Dalarna: Skolverkets länssummering (geo_niva == "lan").
         # Redan en färdig rad per program – ingen viktning behövs.
         d |> dplyr::filter(geo_niva == "lan", organisationstyp == org_filter)
-      } else if (input$geo_niva == "kommun") {
+      } else if (input$geo_niva == "kommun" && length(gv) == 1) {
         # Enskild kommun: också redan en färdig rad per program.
         d |> dplyr::filter(geo_niva == "kommun", kommkod == gv,
                            organisationstyp == org_filter)
       } else {
+        # Flera kommuner eller samverkansområde: viktas ihop (se nedan).
         # Samverkansområde: flera kommuners rader ska slås ihop. Skolverket
         # har ingen färdig aggregatrad på den här nivån (samverkansområden
         # är en lokal Region Dalarna-indelning), så vi joinar in elevantal
@@ -631,8 +690,9 @@ mod_gymnasiet_server <- function(id) {
         # medel. Om en programrad saknar matchande vikt faller
         # .viktat_medel_andel() (func_diagram.R) tillbaka till ovägt medel
         # för just det programmet.
-        d |> dplyr::filter(geo_niva == "kommun", samverkan_i(samverkansomrade, gv),
-                           organisationstyp == org_filter) |>
+        i_omr <- if (input$geo_niva == "kommun") d$kommkod %in% gv
+                 else samverkan_i(d$samverkansomrade, gv)
+        d |> dplyr::filter(i_omr, geo_niva == "kommun", organisationstyp == org_filter) |>
           dplyr::mutate(program = trimws(program)) |>
           dplyr::left_join(
             hamta_elevantal_vikt(),

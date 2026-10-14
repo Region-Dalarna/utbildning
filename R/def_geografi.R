@@ -69,8 +69,11 @@ geo_val_samverkan <- setNames(geo_val_samverkan, geo_val_samverkan)
 GYSAM_HELA <- "Hela Gysam"
 GYSAM_OMRADEN <- grep("^Gysam ", unique(kommun_samverkan$samverkansomrade), value = TRUE)
 
-# TRUE för kommuner som hör till valt samverkansområde (eller till Hela Gysam).
+# TRUE för kommuner som hör till något av valda samverkansområden (val kan
+# vara flera; Hela Gysam räknas som sina tre områden).
+samverkan_expandera <- function(val) {
+  unique(unlist(lapply(val, function(v) if (identical(v, GYSAM_HELA)) GYSAM_OMRADEN else v)))
+}
 samverkan_i <- function(samverkansomrade, val) {
-  if (identical(val, GYSAM_HELA)) samverkansomrade %in% GYSAM_OMRADEN
-  else samverkansomrade == val
+  samverkansomrade %in% samverkan_expandera(val)
 }

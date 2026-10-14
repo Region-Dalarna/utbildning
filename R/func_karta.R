@@ -53,7 +53,9 @@ skapa_karta_samverkan <- function(niva = "kommun") {
       options = list(
         ggiraph::opts_hover(css = RD_KARTA_HOVER_CSS),
         ggiraph::opts_tooltip(css = RD_TOOLTIP_CSS),
-        ggiraph::opts_selection(type = "single", only_shiny = TRUE,
+        # multiple: servern styr urvalet (vanligt klick = ett område,
+        # Ctrl-klick = lägg till/ta bort), se mod_gymnasiet.R.
+        ggiraph::opts_selection(type = "multiple", only_shiny = TRUE,
                                 css = RD_KARTA_SELECT_CSS),
         ggiraph::opts_toolbar(saveaspng = TRUE,
                               hidden = c("lasso_select", "lasso_deselect"))
