@@ -3,10 +3,13 @@
 #  Shiny-modul för skolformen Komvux (inkl. SFI).
 #
 #  Två statistikområden:
-#  - Kursdeltagande: per nivå ("program" = nivåtext, se func_data_komvux.R).
-#    Deltagare (vy "kommun_kon") visas som i Grundskola: en stapel per
-#    kommun, könsuppdelat eller totalt, och klick på en stapel väljer kommunen.
+#  - Nivåer: per nivå ("program" = nivåtext, se func_data_komvux.R).
+#    Elever per kommun (vy "kommun_kon") visas som i Grundskola: en stapel
+#    per kommun, könsuppdelat eller totalt, och klick väljer kommunen.
 #  - Kurser: de största kurserna (kursbeskrivning), övriga slås ihop.
+#
+#  Begrepp i appen: "lästa kurser" = kursdeltaganden (en elev räknas en gång
+#  per kurs), "elever" = deltagare (unika individer).
 #  Utbildningstyp (Komvux/SFI) är ett eget filter, inte en diagramdimension.
 # ============================================================
 
@@ -15,46 +18,57 @@
 
 komvux_struktur <- list(
   kursdeltagande = list(
-    label = "Kursdeltagande",
+    label = "Nivåer",
     indikatorer = list(
-      kursdeltaganden = list(label = "Kursdeltaganden", klar = TRUE, vy = "dashboard", kon = FALSE,
-                             amne = "Antal kursdeltaganden",
-                             metrik = "kursdeltaganden", metrik_label = "Antal kursdeltaganden",
+      # Elever per nivå (ArNivaKon). Nivåerna summeras aldrig - totalen
+      # (trend utan vald nivå, underrubrik) läses från ArKon.
+      elever = list(label = "Elever", klar = TRUE, vy = "dashboard", kon = FALSE, unika = TRUE,
+                    amne = "Antal elever", metrik = "deltagare", metrik_label = "Antal elever",
+                    kalla = .KALLA_KOMVUX,
+                    beskrivning = paste(
+                      "Antal elever (unika personer) som läst minst en kurs under året.",
+                      "En elev som läser på flera nivåer räknas på varje nivå, och med Alla",
+                      "utbildningstyper räknas den som läser både Komvux och SFI i båda.")),
+      kursdeltaganden = list(label = "Lästa kurser", klar = TRUE, vy = "dashboard", kon = FALSE,
+                             amne = "Antal lästa kurser",
+                             metrik = "kursdeltaganden", metrik_label = "Antal lästa kurser",
                              kalla = .KALLA_KOMVUX,
-                             beskrivning = "Antal kursregistreringar (en person kan läsa flera kurser samma termin)."),
-      # Unika deltagare från granulariteten ArKon (se func_data_komvux.R).
-      deltagare = list(label = "Deltagare", klar = TRUE, vy = "kommun_kon", kon = FALSE,
-                       amne = "Antal komvux-/SFI-deltagare",
-                       metrik = "deltagare", metrik_label = "Antal deltagare (unika individer)",
+                             beskrivning = paste(
+                               "Antal kurser som elever har läst under året, avslutade, avbrutna eller",
+                               "pågående. En elev räknas en gång per kurs.")),
+      # Unika elever från granulariteten ArKon (se func_data_komvux.R).
+      deltagare = list(label = "Elever per kommun", klar = TRUE, vy = "kommun_kon", kon = FALSE,
+                       amne = "Antal komvux-/SFI-elever",
+                       metrik = "deltagare", metrik_label = "Antal elever",
                        kalla = .KALLA_KOMVUX,
                        beskrivning = paste(
-                         "Antal unika individer med minst ett kursdeltagande under året.",
+                         "Antal elever (unika personer) per kommun som läst minst en kurs under året.",
                          "Med Alla utbildningstyper räknas den som läser både Komvux och SFI två gånger.")),
       andel_godkant = list(label = "Andel godkända", klar = TRUE, vy = "andel", kon = FALSE,
                           amne = "Andel godkända kurser", metrik = "andel_godkant", vikt = "avslutad_kurs",
                           metrik_label = "Andel godkända (%)", kalla = .KALLA_KOMVUX,
                           beskrivning = paste(
-                            "Andel godkänt bland kursdeltaganden med ett fastställt betygsresultat",
-                            "(dvs bland avslutade kurser - de utan betygsvärde/streck räknas inte in).")),
+                            "Andel godkända bland de lästa kurser som fått ett betyg",
+                            "(avslutade kurser - pågående och avbrutna räknas inte in).")),
       andel_avbrott = list(label = "Andel avbrott", klar = TRUE, vy = "andel", kon = FALSE,
                            amne = "Andel avbrott", metrik = "andel_avbrott", vikt = "kursdeltaganden",
                            metrik_label = "Andel avbrott (%)", kalla = .KALLA_KOMVUX,
-                           beskrivning = "Andel av samtliga kursdeltaganden som slutat med avbrott.")
+                           beskrivning = "Andel av de lästa kurserna som avbrutits.")
     )
   ),
   kurser = list(
     label = "Kurser",
     indikatorer = list(
-      kursdeltaganden = list(label = "Kursdeltaganden", klar = TRUE, vy = "dashboard", kon = FALSE,
-                             amne = "Antal kursdeltaganden",
-                             metrik = "kursdeltaganden", metrik_label = "Antal kursdeltaganden",
+      kursdeltaganden = list(label = "Lästa kurser", klar = TRUE, vy = "dashboard", kon = FALSE,
+                             amne = "Antal lästa kurser",
+                             metrik = "kursdeltaganden", metrik_label = "Antal lästa kurser",
                              kalla = .KALLA_KOMVUX,
-                             beskrivning = paste0("De ", .KOMVUX_ANTAL_KURSER, " kurserna med flest ",
-                                                  "kursdeltaganden i valt område. Övriga kurser slås ihop.")),
+                             beskrivning = paste0("De ", .KOMVUX_ANTAL_KURSER, " kurser som lästs mest ",
+                                                  "i valt område. Övriga kurser slås ihop.")),
       andel_godkant = list(label = "Andel godkända", klar = TRUE, vy = "andel", kon = FALSE,
                            amne = "Andel godkända kurser", metrik = "andel_godkant", vikt = "avslutad_kurs",
                            metrik_label = "Andel godkända (%)", kalla = .KALLA_KOMVUX,
-                           beskrivning = "Andel godkänt bland avslutade kursdeltaganden, per kurs.")
+                           beskrivning = "Andel godkända bland de lästa kurser som fått ett betyg, per kurs.")
     )
   )
 )
@@ -295,6 +309,12 @@ mod_komvux_server <- function(id) {
       df  <- data_ar()
       validate(need(nrow(df) > 0, "Inga data för valt urval."))
       sub <- filter_underrubrik(med_ar = TRUE)
+      if (isTRUE(ind$unika)) {
+        validate(need(any(!is.na(df$deltagare)), "Elever per nivå finns inte i data."))
+        # Totalen från ArKon - nivåerna kan inte summeras (samma elev på flera).
+        tot <- sum(dplyr::filter(deltagare_bas(), ar == as.integer(input$ar))$deltagare)
+        if (tot > 0) sub <- paste0(sub, " \u00b7 totalt ", scales::number(tot, big.mark = " "), " elever")
+      }
 
       if (valt_vy() == "andel") {
         skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
@@ -325,6 +345,8 @@ mod_komvux_server <- function(id) {
       df   <- data_bas()
       validate(need(nrow(df) > 0, "Inga data."))
       prog <- program_vald()
+      # Elever utan vald nivå: totalen från ArKon, inte summan av nivåerna.
+      if (isTRUE(ind$unika) && is.null(prog)) df <- deltagare_bas()
       rub  <- if (is.null(prog)) paste0(ind$amne, " \u2013 utveckling över tid") else paste0(ind$amne, " \u2013 ", prog)
       sub  <- filter_underrubrik()
 

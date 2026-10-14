@@ -8,9 +8,11 @@
 #  - "ArNivaKon": år x utbildningstyp x nivå x kön x område
 #  - "ArKon":     år x utbildningstyp x kön x område (unika deltagare)
 #  - "Kurs":      år x termin x utbildningstyp x kurs x nivå x kön x huvudman
-#  Kursdeltaganden, avbrott och godkänt är rena radräkningar och summerar
-#  lika i alla granulariteter. Deltagare (unika individer) får INTE summeras
-#  över finare nivåer - de läses från "ArKon" (hamta_komvux_deltagare()).
+#  Kursdeltaganden (i appen "lästa kurser"), avbrott och godkänt är rena
+#  radräkningar och summerar lika i alla granulariteter. Deltagare (i appen
+#  "elever", unika individer) får INTE summeras över nivåer eller kurser:
+#  per nivå läses de från "ArNivaKon" (hamta_komvux_data()), totalt från
+#  "ArKon" (hamta_komvux_deltagare()). Summering över kön är säker.
 #  Den som läser både Komvux och SFI räknas i båda när de slås ihop.
 #
 #  "program" i diagramfunktionernas mening = nivå (klartext enligt SCB:s
@@ -70,15 +72,19 @@ rensa_komvux_data <- function(rad) {
   .komvux_cache$ra
 }
 
-# Kursdeltaganden, avbrott och godkänt per år x område x utbildningstyp x nivå.
+# Kursdeltaganden, avbrott, godkänt och elever (unika deltagare per nivå,
+# summerat över kön) per år x område x utbildningstyp x nivå.
 hamta_komvux_data <- function(force = FALSE) {
   if (force || is.null(.komvux_cache$df)) {
     ra <- .komvux_ra(force)
-    # Äldre tabell utan granularitet: alla rader är redan på nivånivå.
+    # Äldre tabell utan granularitet: alla rader är redan på nivånivå, men
+    # deltagare per nivå finns inte.
+    har_niva_delt <- all(c("granularitet", "deltagare") %in% names(ra))
     if ("granularitet" %in% names(ra)) ra <- dplyr::filter(ra, granularitet == "ArNivaKon")
     .komvux_cache$df <- ra |>
       dplyr::group_by(ar, kommkod, kommun, geo_niva, utbildningstyp, program) |>
       dplyr::summarise(dplyr::across(dplyr::all_of(.komvux_matt), ~sum(.x, na.rm = TRUE)),
+                       deltagare = if (har_niva_delt) sum(deltagare, na.rm = TRUE) else NA_real_,
                        .groups = "drop") |>
       .komvux_andelar()
   }
