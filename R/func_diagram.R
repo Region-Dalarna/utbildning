@@ -298,8 +298,11 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
 
 # program_sel = NULL  -> översikt, andel per programtyp.
 # program_sel angivet -> hela 100%-stapeln, valt program markerat, resten nedtonat.
+# Alla andelar i tooltip är andelar av helheten ("av alla antagna" o.s.v.).
 skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NULL,
                                      rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  av_alla <- paste0(" av alla ", tolower(sub("^Antal ", "", metrik_label)))
+  pct <- function(x) scales::percent(x, accuracy = 1)
   df <- dplyr::filter(df, !is.na(programtyp))
   df$programtyp <- trimws(as.character(df$programtyp))
   df <- dplyr::filter(
@@ -322,8 +325,7 @@ skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NUL
         andel    = dplyr::if_else(ar_total > 0, antal / ar_total, 0),
         markerad = TRUE,
         grp      = as.character(programtyp),
-        tooltip  = paste0("<b>", programtyp, "</b><br/>", metrik_label, " ", ar, ": ",
-                          scales::percent(andel, accuracy = 1)))
+        tooltip  = paste0("<b>", programtyp, "</b><br/>", ar, ": ", pct(andel), av_alla))
     return(.rita_programtyp(d, rubrik = rubrik, underrubrik = underrubrik, kalla = kalla))
   }
 
@@ -358,16 +360,21 @@ skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NUL
   tot <- combined |>
     dplyr::group_by(ar) |>
     dplyr::summarise(ar_total = sum(antal), .groups = "drop")
+  # Valda programtypen: tooltip för båda delarna anger även hela typens andel,
+  # så att det framgår att den nedtonade delen är typen utan valt program.
   d <- combined |>
     dplyr::left_join(tot, by = "ar") |>
+    dplyr::group_by(ar, programtyp) |>
+    dplyr::mutate(typ_andel = sum(antal) / dplyr::first(ar_total)) |>
+    dplyr::ungroup() |>
     dplyr::mutate(
       andel = dplyr::if_else(ar_total > 0, antal / ar_total, 0),
-      tooltip = ifelse(
-        markerad,
-        paste0("<b>", program_sel, "</b><br/>", ar, ": ",
-               scales::percent(andel, accuracy = 1), " av totalen"),
-        paste0("<b>", programtyp, "</b><br/>", ar, ": ",
-               scales::percent(andel, accuracy = 1))))
+      typ_rad = paste0("<br/>", programtyp, " totalt: ", pct(typ_andel), av_alla),
+      tooltip = dplyr::case_when(
+        markerad ~ paste0("<b>", program_sel, "</b><br/>", ar, ": ", pct(andel), av_alla, typ_rad),
+        programtyp == sel_typ ~ paste0("<b>", programtyp, " utom ", program_sel, "</b><br/>", ar, ": ",
+                                       pct(andel), av_alla, typ_rad),
+        TRUE ~ paste0("<b>", programtyp, "</b><br/>", ar, ": ", pct(andel), av_alla)))
 
   .rita_programtyp(d, rubrik = rubrik, underrubrik = underrubrik, kalla = kalla)
 }
