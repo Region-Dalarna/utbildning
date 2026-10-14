@@ -27,6 +27,7 @@ rensa_gymnasiedata <- function(rad) {
       program            = program,
       program_inriktning = program_inriktning,
       programtyp         = programtyp,
+      anskod             = if ("anskod" %in% names(rad)) anskod else NA_character_,
       organisationstyp   = organisationstyp,            # driftsform (kommun/fristående)
       platser            = org,
       sok_1a             = `1a_tot`,
@@ -39,7 +40,128 @@ rensa_gymnasiedata <- function(rad) {
       merit_medel        = merit_medel
     ) |>
     # Samverkansområde finns inte i tabellen – joinas på kommkod.
-    dplyr::left_join(kommun_samverkan, by = "kommkod")
+    dplyr::left_join(kommun_samverkan, by = "kommkod") |>
+    tolka_anskod()
+}
+
+# ---- Inriktningar och IM-varianter ur anskod --------------------------------
+# anskod = programkod (2 tecken) + inriktningskod (3 bokstäver) + ev. tillägg:
+#   0L/00L = lärling, 0R/00R/S0R = riksrekrytering, SPR = spetsutbildning,
+#   -XXX = lokal profil (räknas som programmet/inriktningen).
+# "25" direkt efter programkoden = Gy25-versionen av programmet (samma program).
+# Koder som BAHUD är inriktningar, BA/BA25/EK-EKIALP saknar inriktning.
+# Introduktionsprogrammet (IM): IMPRO/IMV = programinriktat val, IMYRK/IMY =
+# yrkesintroduktion, följt av målprogrammets kod (t.ex. IMYVO, IMPROBA).
+# Rena "IM" = variant ej angiven (troligen individuellt alternativ och
+# språkintroduktion, som inte söks via antagningen).
+#
+# Lägger till kolumnerna inriktning (nivå 1 under programmet) och mal (nivå 2,
+# bara IM: programmet varianten riktar sig mot). Inriktningarnas namn tas ur
+# fritexten (program_inriktning) och ANTAGNING_INRIKTNING_NAMN; koder utan
+# namn visas som "Inriktning <kod>" (se antagning_inriktningar_utan_namn()).
+ANTAGNING_EJ_VALD   <- "Inriktning väljs senare / ej vald"
+ANTAGNING_IM_EJ_ANG <- "Variant ej angiven"
+
+# Namn för inriktningskoder som saknas i fritexten. Fylls på efter kontroll.
+ANTAGNING_INRIKTNING_NAMN <- c()
+
+# De nationella programmens koder (för IM:s målprogram).
+NATIONELLA_PROGRAM <- c(
+  BA = "Bygg- och anläggningsprogrammet", BF = "Barn- och fritidsprogrammet",
+  EE = "El- och energiprogrammet",        EK = "Ekonomiprogrammet",
+  ES = "Estetiska programmet",            FS = "Försäljnings- och serviceprogrammet",
+  FT = "Fordons- och transportprogrammet", HA = "Handels- och administrationsprogrammet",
+  HT = "Hotell- och turismprogrammet",    HU = "Humanistiska programmet",
+  HV = "Hantverksprogrammet",             IN = "Industritekniska programmet",
+  "NA" = "Naturvetenskapsprogrammet",     NB = "Naturbruksprogrammet",
+  RL = "Restaurang- och livsmedelsprogrammet", SA = "Samhällsvetenskapsprogrammet",
+  TE = "Teknikprogrammet",                VF = "VVS- och fastighetsprogrammet",
+  VO = "Vård- och omsorgsprogrammet"
+)
+
+.anskod_variant <- function(rest) {
+  dplyr::case_when(
+    grepl("SPR$", rest)          ~ "spetsutbildning",
+    grepl("0R$", rest)           ~ "riksrekrytering",
+    grepl("0L$", rest)           ~ "lärling",
+    TRUE                         ~ NA_character_)
+}
+
+# Inriktningens namn ur fritexten: delen efter programnamnet, t.ex.
+# "El- och energiprogrammet, elteknik, riksrekrytering" -> "Elteknik".
+.inriktning_ur_text <- function(txt) {
+  del <- sub("^[^,;]*[,;] *", "", txt)
+  del <- ifelse(del == txt | is.na(txt), NA_character_, sub(" *[,;].*$", "", del))
+  ifelse(is.na(del) | del == "", NA_character_,
+         paste0(toupper(substr(del, 1, 1)), substr(del, 2, nchar(del))))
+}
+
+tolka_anskod <- function(d) {
+  if (all(is.na(d$anskod))) {
+    d$inriktning <- NA_character_; d$mal <- NA_character_
+    return(d)
+  }
+  kod  <- toupper(trimws(d$anskod))
+  prg  <- substr(kod, 1, 2)
+  rest <- substr(kod, 3, nchar(kod))
+  rest <- sub("^25", "", rest)                     # Gy25 = samma program
+  ar_im <- prg == "IM"
+
+  # Nationella program: inriktningskod = tre bokstäver direkt efter programkoden.
+  inr_kod <- ifelse(!ar_im & grepl("^[A-ZÅÄÖ]{3}", rest), substr(rest, 1, 3), NA_character_)
+  variant <- .anskod_variant(sub("-.*$", "", rest))
+
+  # Namn per (program, inriktningskod): vanligaste namnet i fritexten.
+  namn <- tibble::tibble(prg, inr_kod, txt = .inriktning_ur_text(d$program_inriktning)) |>
+    dplyr::filter(!is.na(inr_kod), !is.na(txt)) |>
+    dplyr::count(prg, inr_kod, txt) |>
+    dplyr::group_by(prg, inr_kod) |>
+    dplyr::slice_max(n, n = 1, with_ties = FALSE) |>
+    dplyr::ungroup()
+  inr_namn <- namn$txt[match(paste(prg, inr_kod), paste(namn$prg, namn$inr_kod))]
+  inr_namn <- dplyr::coalesce(inr_namn, unname(ANTAGNING_INRIKTNING_NAMN[paste0(prg, inr_kod)]),
+                              ifelse(is.na(inr_kod), NA_character_, paste("Inriktning", inr_kod)))
+  inriktning <- dplyr::case_when(
+    !is.na(inr_namn) & !is.na(variant) ~ paste0(inr_namn, " (", variant, ")"),
+    !is.na(inr_namn)                   ~ inr_namn,
+    !is.na(variant) ~ paste0(toupper(substr(variant, 1, 1)), substr(variant, 2, nchar(variant))),
+    TRUE                               ~ ANTAGNING_EJ_VALD)
+
+  # IM: variant och målprogram.
+  im_var <- dplyr::case_when(
+    grepl("^(PRO|V)", rest)  ~ "Programinriktat val",
+    grepl("^(YRK|Y)", rest)  ~ "Yrkesintroduktion",
+    grepl("^IND", rest)      ~ "Individuellt alternativ",
+    grepl("^SPR", rest)      ~ "Språkintroduktion",
+    TRUE                     ~ ANTAGNING_IM_EJ_ANG)
+  mal_kod <- dplyr::case_when(
+    grepl("^(PRO|YRK)", rest) ~ substr(rest, 4, 5),
+    grepl("^(V|Y)", rest)     ~ substr(rest, 2, 3),
+    TRUE                      ~ "")
+  # Programnamn: fasta listan, annars namnet i datan.
+  prog_namn <- d |> dplyr::filter(pr_kod != "IM") |> dplyr::distinct(pr_kod, program)
+  mal <- dplyr::coalesce(unname(NATIONELLA_PROGRAM[mal_kod]),
+                         prog_namn$program[match(mal_kod, prog_namn$pr_kod)])
+  mal <- dplyr::case_when(!grepl("^[A-ZÅÄÖ]{2}$", mal_kod) ~ "Målprogram ej angivet",
+                          is.na(mal)                        ~ paste("Programkod", mal_kod),
+                          TRUE                              ~ mal)
+
+  d$inriktning <- ifelse(ar_im, im_var, inriktning)
+  d$mal        <- ifelse(ar_im & im_var %in% c("Programinriktat val", "Yrkesintroduktion"), mal, NA_character_)
+  d
+}
+
+# Inriktningskoder som saknar namn (visas som "Inriktning <kod>" i appen).
+# Lägg till dem i ANTAGNING_INRIKTNING_NAMN, t.ex. c("NBNAM" = "Naturturism").
+antagning_inriktningar_utan_namn <- function() {
+  hamta_gymnasiedata() |>
+    dplyr::filter(grepl("^Inriktning [A-ZÅÄÖ]{3}", inriktning)) |>
+    dplyr::mutate(kod = paste0(pr_kod, sub("^Inriktning ([A-ZÅÄÖ]{3}).*$", "\\1", inriktning))) |>
+    dplyr::group_by(program, kod) |>
+    dplyr::summarise(exempel_anskod = paste(utils::head(unique(anskod), 4), collapse = " "),
+                     ar = paste(range(ar), collapse = "–"),
+                     antagna = sum(antagna, na.rm = TRUE), .groups = "drop") |>
+    dplyr::arrange(program, kod)
 }
 
 # ---- Publik läsfunktion ----------------------------------------------------

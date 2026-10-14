@@ -49,6 +49,11 @@ Tabellerna hämtas en gång per R-process och cachas. Komvux och Folkhögskola h
 en kolumn `granularitet`: deltagare (unika individer) får inte summeras över
 finare nivåer, så de läses från den nivå som motsvarar diagrammet.
 
+I Antagning tolkas inriktning och introduktionsprogrammets varianter ur
+`anskod` (`tolka_anskod()` i `R/func_data.R`). Inriktningskoder som saknar namn
+i fritexten listas med `antagning_inriktningar_utan_namn()` och läggs in i
+`ANTAGNING_INRIKTNING_NAMN`.
+
 ## Data in i databasen
 Appen läser bara från databasen. Tabellerna skrivs med separata skript
 utanför det här repot (t.ex. `hogskola_etablering`, som är en summering av

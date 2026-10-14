@@ -662,16 +662,113 @@ mod_gymnasiet_server <- function(id) {
       }, ignoreInit = TRUE)
     })
 
+    # ---- Nedborrning i Antagning ---------------------------------------------
+    # Klick på ett program visar dess inriktningar (ur anskod, se
+    # tolka_anskod()); för Introduktionsprogram varianterna och ett klick till
+    # målprogrammen. ant_drill = vägen ned (program, ev. IM-variant),
+    # ant_fokus = vald stapel på aktuell nivå (för trenden). program_vald
+    # behåller programmet (programtypsdiagrammet).
+    ant_drill <- reactiveVal(character(0))
+    ant_fokus <- reactiveVal(NULL)
+    ar_antagning <- reactive(identical(input$omrade, "antagning") && valt_vy() == "dashboard" &&
+                               "inriktning" %in% names(aktuell_data()))
+    .ant_kol <- c("program", "inriktning", "mal")
+    ant_ar_im <- reactive({
+      p <- ant_drill()
+      length(p) > 0 && any(aktuell_data()$pr_kod[aktuell_data()$program == p[1]] %in% "IM")
+    })
+    # Rader på aktuell nivå, med "program" = det som staplarna visar.
+    niva_data <- function(d) {
+      p <- ant_drill()
+      if (length(p) == 0 || !ar_antagning()) return(d)
+      d <- dplyr::filter(d, program == p[1])
+      if (length(p) == 2) d <- dplyr::filter(d, inriktning == p[2])
+      d$program <- d[[.ant_kol[length(p) + 1]]]
+      d
+    }
+    # Går det att borra vidare i stapeln? Inriktningar: minst två olika
+    # (annars bara "ej vald"). IM-varianter: minst ett målprogram.
+    kan_borra <- function(sel) {
+      p <- ant_drill()
+      if (length(p) >= 2) return(FALSE)
+      d <- data_ar()
+      d <- if (length(p) == 0) dplyr::filter(d, program == sel)
+           else dplyr::filter(d, program == p[1], inriktning == sel)
+      kol  <- .ant_kol[length(p) + 2]
+      vard <- unique(stats::na.omit(d[[kol]]))
+      if (kol == "mal") length(vard) >= 1 else length(vard) > 1
+    }
+
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      if (isolate(ar_antagning())) {
+        p <- isolate(ant_drill())
+        if (length(sel) != 1) {
+          if (length(p) > 0) ant_fokus(NULL) else program_vald(NULL)
+          return()
+        }
+        if (length(p) == 0) program_vald(sel)
+        if (isolate(kan_borra(sel))) {
+          ant_drill(c(p, sel)); ant_fokus(NULL)
+        } else if (length(p) > 0) {
+          ant_fokus(sel)
+        }
+        return()
+      }
       program_vald(if (length(sel) >= 1) sel else NULL)
     }, ignoreNULL = FALSE)
+    observeEvent(input$ant_tillbaka_alla, {
+      ant_drill(character(0)); ant_fokus(NULL); program_vald(NULL)
+    })
+    observeEvent(input$ant_tillbaka_upp, { ant_drill(ant_drill()[1]); ant_fokus(NULL) })
+
+    # Vad staplarna visar på aktuell nivå (till rubriken).
+    ant_dim_text <- function() {
+      p <- ant_drill()
+      if (length(p) == 0 || !ar_antagning()) return(" efter program")
+      if (length(p) == 1) paste0(if (ant_ar_im()) " efter variant – " else " efter inriktning – ", p[1])
+      else paste0(" efter målprogram – ", p[2])
+    }
+
+    output$ant_nav <- renderUI({
+      p <- ant_drill()
+      if (length(p) == 0 || !ar_antagning()) return(NULL)
+      tagList(
+        actionLink(ns("ant_tillbaka_alla"), "\u2190 Alla program", class = "rd-tillbaka"),
+        if (length(p) == 2)
+          actionLink(ns("ant_tillbaka_upp"), paste0("\u2190 ", p[1]), class = "rd-tillbaka"))
+    })
+
+    output$bar_hint <- renderUI({
+      txt <- if (!ar_antagning()) {
+        "Klicka på en stapel i diagrammet för att se statistik för ett specifikt program."
+      } else {
+        p <- ant_drill()
+        if (length(p) == 0) "Klicka på ett program för att se dess inriktningar (där de finns) och utvecklingen över tid."
+        else if (length(p) == 1 && ant_ar_im()) "Klicka på en variant för att se vilka program den riktar sig mot."
+        else if (length(p) == 1) "Klicka på en inriktning för att se utvecklingen över tid."
+        else "Klicka på ett program för att se utvecklingen över tid."
+      }
+      notis <- if (ar_antagning() && length(ant_drill()) > 0) {
+        if (ant_ar_im()) paste(
+          "Individuellt alternativ och språkintroduktion söks oftast inte via gymnasieantagningen",
+          "och kan inte skiljas ut här – de ingår i \"Variant ej angiven\".",
+          "Under Elever finns antal elever på introduktionsprogrammets alla varianter.")
+        else paste(
+          "Inriktning syns bara när den väljs vid antagningen. På många program väljer eleverna",
+          "inriktning först under utbildningen – de räknas till \"Inriktning väljs senare / ej vald\".",
+          "Lärling, riksrekrytering och spetsutbildning anges inom parentes.")
+      }
+      tagList(tags$p(class = "rd-hint rd-hint--bar", txt),
+              if (!is.null(notis)) tags$p(class = "rd-hint", notis))
+    })
     # Klickval och filter ligger kvar så länge man är kvar i samma
     # statistikområde (Antagning/Elever/Resultat/Etablering). De nollställs
     # BARA när man byter statistikområde – inte vid indikatorbyte och inte
     # vid ändring av examensperiod, geografi, driftsform osv.
     observeEvent(input$omrade, {
       program_vald(NULL)
+      ant_drill(character(0)); ant_fokus(NULL)
       # Nollställ programfiltret (visa alla) vid byte av statistikområde
       if (valt_vy() == "etablering") {
         d_et <- hamta_etablering()
@@ -722,8 +819,9 @@ mod_gymnasiet_server <- function(id) {
       } else if (valt_vy() == "dashboard") {
         fluidRow(
           column(7,
+                 uiOutput(ns("ant_nav")),
                  ggiraph::girafeOutput(ns("d_bar"), height = "470px"),
-                 hint,
+                 uiOutput(ns("bar_hint")),
                  uiOutput(ns("kon_kontroll"))),
           column(5,
                  div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "250px")),
@@ -815,7 +913,7 @@ mod_gymnasiet_server <- function(id) {
                                          rubrik = ind$amne,
                                          underrubrik = sub_gs, kalla = ind$kalla)
       } else {
-        df <- data_ar_prog()
+        df <- niva_data(data_ar_prog())
         validate(need(nrow(df) > 0, "Inga data för valt urval."))
         if (valt_vy() == "arskurs") {
           skapa_diagram_arskurs(df, input$ar, rubrik = ind$amne,
@@ -832,11 +930,11 @@ mod_gymnasiet_server <- function(id) {
                                   kalla = ind$kalla)
         } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
           skapa_diagram_bar_kon(min_antal = 0, df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, input$ar,
-                                rubrik = paste0(ind$amne, " efter program"),
+                                rubrik = paste0(ind$amne, ant_dim_text()),
                                 underrubrik = sub, kalla = ind$kalla)
         } else {
           skapa_diagram_bar(min_antal = 0, df, ind$metrik, ind$metrik_label, input$ar,
-                            rubrik = paste0(ind$amne, " efter program"),
+                            rubrik = paste0(ind$amne, ant_dim_text()),
                             underrubrik = sub, kalla = ind$kalla)
         }
       }
@@ -888,11 +986,16 @@ mod_gymnasiet_server <- function(id) {
 
     output$d_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      df <- data_bas_prog()
+      df <- niva_data(data_bas_prog())
       validate(need(nrow(df) > 0, "Inga data."))
-      prog <- program_vald()
-      rub  <- if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
+      # Nedborrat i Antagning: hela vägen ned i rubriken (program › inriktning).
+      drill <- if (ar_antagning()) ant_drill() else character(0)
+      prog  <- if (length(drill) > 0) ant_fokus() else program_vald()
+      fokus <- c(drill, ant_fokus())
+      rub  <- if (length(drill) > 0) paste0(ind$amne, " – ", paste(fokus, collapse = " › "))
+      else if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
       else paste0(ind$amne, " – ", prog)
+      rub  <- paste(strwrap(rub, width = 55), collapse = "\n")
       # Underrubrik: bara filtret (driftsform + geografi). Trenddiagrammet
       # visar alla år i tidsserien, så inget enskilt år ska anges här.
       sub  <- filter_underrubrik()
