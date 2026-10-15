@@ -104,8 +104,9 @@ hamta_komvux_deltagare <- function(utbildningstyp = "_alla_") {
     dplyr::summarise(deltagare = sum(deltagare, na.rm = TRUE), .groups = "drop")
 }
 
-# Kursdeltaganden, avbrott och godkänt per kurs ("program" = kursbeskrivning),
-# summerat över termin, nivå, kön och huvudman.
+# Kursdeltaganden, avbrott och godkänt per kurs ("program" = kursbeskrivning)
+# och nivå (niva_namn, samma text som nivåernas "program"), summerat över
+# termin, kön och huvudman.
 hamta_komvux_kurser <- function() {
   if (is.null(.komvux_cache$kurser)) {
     ra <- .komvux_ra()
@@ -113,12 +114,13 @@ hamta_komvux_kurser <- function() {
     .komvux_cache$kurser <- ra |>
       dplyr::filter(granularitet == "Kurs") |>
       dplyr::mutate(
+        niva_namn = program,
         program = dplyr::coalesce(kursbeskrivning, kurskod, "Okänd kurs"),
         # SFI-kurserna heter bara A-D - prefixa så att de syns som SFI.
         program = dplyr::if_else(utbildningstyp == "SFI" & !grepl("^sfi", program, ignore.case = TRUE),
                                  paste("SFI", program), program)
       ) |>
-      dplyr::group_by(ar, kommkod, kommun, geo_niva, utbildningstyp, program) |>
+      dplyr::group_by(ar, kommkod, kommun, geo_niva, utbildningstyp, niva_namn, program) |>
       dplyr::summarise(dplyr::across(dplyr::all_of(.komvux_matt), ~sum(.x, na.rm = TRUE)),
                        .groups = "drop") |>
       .komvux_andelar()

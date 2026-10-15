@@ -2,11 +2,13 @@
 #  mod_komvux.R
 #  Shiny-modul för skolformen Komvux (inkl. SFI).
 #
-#  Två statistikområden:
-#  - Nivåer: per nivå ("program" = nivåtext, se func_data_komvux.R).
-#    Elever per kommun (vy "kommun_kon") visas som i Grundskola: en stapel
-#    per kommun, könsuppdelat eller totalt, och klick väljer kommunen.
-#  - Kurser: de största kurserna (kursbeskrivning), övriga slås ihop.
+#  Staplarna visar nivåerna ("program" = nivåtext, se func_data_komvux.R).
+#  Klick på en nivå visar dess kurser (granularitet Kurs, de största, övriga
+#  ihop), klick på en kurs visar den över tid. Nivåns egna siffror kommer
+#  alltid från nivåraderna. Elever kan inte delas på kurs (samma elev kan
+#  läsa en kurs flera terminer) - där visar klick bara nivån över tid.
+#  Elever per kommun (vy "kommun_kon") visas som i Grundskola: en stapel
+#  per kommun, könsuppdelat eller totalt, och klick väljer kommunen.
 #
 #  Begrepp i appen: "lästa kurser" = kursdeltaganden (en elev räknas en gång
 #  per kurs), "elever" = deltagare (unika individer).
@@ -18,7 +20,7 @@
 
 komvux_struktur <- list(
   kursdeltagande = list(
-    label = "Nivåer",
+    label = "Nivåer och kurser",
     indikatorer = list(
       # Elever per nivå (ArNivaKon). Nivåerna summeras aldrig - totalen
       # (trend utan vald nivå, underrubrik) läses från ArKon.
@@ -35,7 +37,8 @@ komvux_struktur <- list(
                              kalla = .KALLA_KOMVUX,
                              beskrivning = paste(
                                "Antal kurser som elever har läst under året, avslutade, avbrutna eller",
-                               "pågående. En elev räknas en gång per kurs.")),
+                               "pågående. En elev räknas en gång per kurs. Klicka på en nivå för att",
+                               "se kurserna.")),
       # Unika elever från granulariteten ArKon (se func_data_komvux.R).
       deltagare = list(label = "Elever per kommun", klar = TRUE, vy = "kommun_kon", kon = FALSE,
                        amne = "Antal komvux-/SFI-elever",
@@ -54,21 +57,6 @@ komvux_struktur <- list(
                            amne = "Andel avbrott", metrik = "andel_avbrott", vikt = "kursdeltaganden",
                            metrik_label = "Andel avbrott (%)", kalla = .KALLA_KOMVUX,
                            beskrivning = "Andel av de lästa kurserna som avbrutits.")
-    )
-  ),
-  kurser = list(
-    label = "Kurser",
-    indikatorer = list(
-      kursdeltaganden = list(label = "Lästa kurser", klar = TRUE, vy = "dashboard", kon = FALSE,
-                             amne = "Antal lästa kurser",
-                             metrik = "kursdeltaganden", metrik_label = "Antal lästa kurser",
-                             kalla = .KALLA_KOMVUX,
-                             beskrivning = paste0("De ", .KOMVUX_ANTAL_KURSER, " kurser som lästs mest ",
-                                                  "i valt område. Övriga kurser slås ihop.")),
-      andel_godkant = list(label = "Andel godkända", klar = TRUE, vy = "andel", kon = FALSE,
-                           amne = "Andel godkända kurser", metrik = "andel_godkant", vikt = "avslutad_kurs",
-                           metrik_label = "Andel godkända (%)", kalla = .KALLA_KOMVUX,
-                           beskrivning = "Andel godkända bland de lästa kurser som fått ett betyg, per kurs.")
     )
   )
 )
@@ -156,12 +144,20 @@ mod_komvux_server <- function(id) {
       )
     })
 
+    # ---- Nedborrning: nivå -> kurser ------------------------------------------
+    niva_drill <- reactiveVal(NULL)
+    # Kurserna kan visas för allt utom elever (unika personer).
+    kan_borra <- reactive(!isTRUE(valt_indikator()$unika) && valt_vy() != "kommun_kon")
+    observeEvent(kan_borra(), { if (!kan_borra()) { niva_drill(NULL); program_vald(NULL) } })
+    observeEvent(input$tillbaka, { niva_drill(NULL); program_vald(NULL) })
+
     aktuell_data <- reactive({
-      if (identical(input$omrade, "kurser")) hamta_komvux_kurser() else hamta_komvux_data()
+      if (is.null(niva_drill())) hamta_komvux_data()
+      else dplyr::filter(hamta_komvux_kurser(), niva_namn == niva_drill())
     })
 
-    # Vad staplarna visar i aktuellt statistikområde.
-    dim_label <- reactive({ if (identical(input$omrade, "kurser")) "kurs" else "nivå" })
+    # Vad staplarna visar.
+    dim_label <- reactive({ if (is.null(niva_drill())) "nivå" else "kurs" })
 
     valt_indikator <- reactive({
       req(input$omrade)
@@ -202,6 +198,10 @@ mod_komvux_server <- function(id) {
                                           selected = if (sel == "20") "_alla_" else sel)
         return()
       }
+      if (is.null(isolate(niva_drill())) && isolate(kan_borra()) && length(sel) == 1) {
+        niva_drill(sel); program_vald(NULL)
+        return()
+      }
       program_vald(if (length(sel) >= 1) sel else NULL)
     }, ignoreNULL = FALSE)
 
@@ -216,7 +216,7 @@ mod_komvux_server <- function(id) {
       if (gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
       else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
     })
-    observeEvent(input$omrade, { program_vald(NULL) }, ignoreInit = TRUE)
+    observeEvent(input$omrade, { program_vald(NULL); niva_drill(NULL) }, ignoreInit = TRUE)
 
     output$ar_ui <- renderUI({
       d <- aktuell_data()
@@ -238,7 +238,7 @@ mod_komvux_server <- function(id) {
 
       # Kurser: behåll de största kurserna (över alla år, så att samma kurser
       # visas oavsett år) och slå ihop resten.
-      if (identical(input$omrade, "kurser") && nrow(d) > 0) {
+      if (!is.null(niva_drill()) && nrow(d) > 0) {
         storst <- d |>
           dplyr::group_by(program) |>
           dplyr::summarise(n = sum(kursdeltaganden, na.rm = TRUE), .groups = "drop") |>
@@ -281,10 +281,18 @@ mod_komvux_server <- function(id) {
         ))
       }
       hint <- tags$p(class = "rd-hint rd-hint--bar",
-                     paste0("Klicka på en stapel i diagrammet för att se statistik för en specifik ",
-                            dim_label(), "."))
+                     if (is.null(niva_drill()) && kan_borra())
+                       "Klicka på en nivå för att se kurserna."
+                     else paste0("Klicka på en stapel för att se utvecklingen över tid för en ",
+                                 dim_label(), "."))
+      tillbaka <- if (!is.null(niva_drill()))
+        actionLink(ns("tillbaka"), "\u2190 Alla nivåer", class = "rd-tillbaka")
+      notis <- if (!is.null(niva_drill()))
+        tags$p(class = "rd-hint", paste0("De ", .KOMVUX_ANTAL_KURSER, " mest lästa kurserna visas, ",
+                                         "övriga slås ihop. Nivåns egna siffror (trenden utan vald kurs) ",
+                                         "räknas på hela nivån."))
       fluidRow(
-        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
+        column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint, notis),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
       )
     })
@@ -316,14 +324,14 @@ mod_komvux_server <- function(id) {
         if (tot > 0) sub <- paste0(sub, " \u00b7 totalt ", scales::number(tot, big.mark = " "), " elever")
       }
 
+      rub <- paste0(ind$amne, " efter ", dim_label(),
+                    if (!is.null(niva_drill())) paste0(" \u2013 ", niva_drill()))
       if (valt_vy() == "andel") {
         skapa_diagram_bar_andel(df, ind$metrik, ind$vikt, ind$metrik_label, input$ar,
-                                rubrik = paste0(ind$amne, " efter ", dim_label()),
-                                underrubrik = sub, kalla = ind$kalla)
+                                rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       } else {
         skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
-                          rubrik = paste0(ind$amne, " efter ", dim_label()),
-                          underrubrik = sub, kalla = ind$kalla)
+                          rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       }
     })
 
@@ -347,7 +355,17 @@ mod_komvux_server <- function(id) {
       prog <- program_vald()
       # Elever utan vald nivå: totalen från ArKon, inte summan av nivåerna.
       if (isTRUE(ind$unika) && is.null(prog)) df <- deltagare_bas()
-      rub  <- if (is.null(prog)) paste0(ind$amne, " \u2013 utveckling över tid") else paste0(ind$amne, " \u2013 ", prog)
+      # Nedborrat utan vald kurs: nivåns egna rader (inte summan av kurserna).
+      if (!is.null(niva_drill()) && is.null(prog)) {
+        df <- hamta_komvux_data() |>
+          dplyr::filter(if (input$geo_val == "_alla_") geo_niva == "lan" else geo_niva == "kommun" & kommkod == input$geo_val) |>
+          filtrera_utbildningstyp(input$utbildningstyp)
+        prog <- niva_drill()
+      }
+      fokus <- unique(c(niva_drill(), prog))
+      rub  <- if (length(fokus) == 0) paste0(ind$amne, " \u2013 utveckling över tid")
+              else paste0(ind$amne, " \u2013 ", paste(fokus, collapse = " \u203a "))
+      rub  <- paste(strwrap(rub, width = 55), collapse = "\n")
       sub  <- filter_underrubrik()
 
       if (valt_vy() == "andel") {
