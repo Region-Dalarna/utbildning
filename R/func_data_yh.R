@@ -206,6 +206,36 @@ hamta_yh_etablering <- function(force = FALSE) {
   .yh_etablering_cache$df
 }
 
+# ---- Arbetsort ------------------------------------------------------------------
+# yh_uppfoljning_arbetsort: var de utexaminerade har sitt arbetsställe
+# (ast_kommun, ast_i_dalarna), per studieort (regionkod), examensår,
+# uppföljningstid, utbildningsområde och kön. Bara områdesnivå. Alla
+# utexaminerade finns med (antal = samma som i yh_uppfoljning).
+.yh_arbetsort_cache <- new.env(parent = emptyenv())
+
+rensa_yh_arbetsort <- function(rad) {
+  rad |>
+    dplyr::rename(kommkod = regionkod, kommun = region, program = utbildningsomrade) |>
+    dplyr::mutate(
+      kommkod       = as.character(kommkod),
+      ar            = as.integer(substr(exam_ar_interval, 1, 4)),
+      antal_ar      = as.integer(antal_ar),
+      ast_kommunkod = as.character(ast_kommunkod),
+      ast_kommun    = dplyr::coalesce(ast_kommun, "Okänd arbetsort"),
+      ast_i_dalarna = as.logical(ast_i_dalarna) %in% TRUE
+    ) |>
+    dplyr::filter(ar + antal_ar <= YH_SISTA_UPPF_AR) |>
+    dplyr::group_by(ar, exam_ar_interval, antal_ar, kommkod, kommun, geo_niva, program, kon,
+                    ast_kommunkod, ast_kommun, ast_i_dalarna) |>
+    dplyr::summarise(antal = sum(antal, na.rm = TRUE), .groups = "drop")
+}
+
+hamta_yh_arbetsort <- function(force = FALSE) {
+  if (force || is.null(.yh_arbetsort_cache$df))
+    .yh_arbetsort_cache$df <- rensa_yh_arbetsort(.yh_hamta_tabell("yh_uppfoljning_arbetsort"))
+  .yh_arbetsort_cache$df
+}
+
 # Första examensåret med den nya definitionen för en uppföljningstid.
 yh_forsta_nya_examensar <- function(antal_ar) YH_DEFINITIONSBYTE - as.integer(antal_ar)
 

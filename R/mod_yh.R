@@ -82,7 +82,15 @@ yh_struktur <- list(
       arblos = list(label = "Arbetslösa",  klar = TRUE, vy = "etablering", kon = FALSE,
                     amne = "Arbetslösa efter YH", metrik = "arblos",
                     metrik_label = "Andel arbetslösa", kalla = .KALLA_YH_ETABL,
-                    beskrivning = "Arbetslös är den som har sin största inkomst från arbetslöshetsersättningar.")
+                    beskrivning = "Arbetslös är den som har sin största inkomst från arbetslöshetsersättningar."),
+      # yh_uppfoljning_arbetsort (bara områdesnivå), se func_data_yh.R.
+      arbetsort = list(label = "Arbetsort", klar = TRUE, vy = "arbetsort", kon = FALSE,
+                       amne = "Var arbetar de efter YH?", metrik = "antal",
+                       metrik_label = "Antal utexaminerade", kalla = .KALLA_YH_ETABL,
+                       beskrivning = paste(
+                         "I vilken kommun de utexaminerade har sitt arbetsställe 1, 3 eller 5 år",
+                         "efter examen, och hur stor andel som arbetar i Dalarna respektive i",
+                         "samma kommun som de studerade i."))
     )
   )
 )
@@ -170,7 +178,9 @@ mod_yh_server <- function(id) {
     aktuell_data <- reactive({
       omr <- req(input$omrade)
       if (omr == "resultat")        hamta_yh_genomstromning()
-      else if (omr == "etablering") hamta_yh_etablering()
+      else if (omr == "etablering") {
+        if (identical(input$indikator, "arbetsort")) hamta_yh_arbetsort() else hamta_yh_etablering()
+      }
       else                          hamta_yh_studerande()
     })
 
@@ -212,6 +222,7 @@ mod_yh_server <- function(id) {
     utb_vald     <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      if (isolate(valt_vy()) == "arbetsort") return()      # staplarna är arbetskommuner
       if (is.null(isolate(omrade_drill()))) {
         if (length(sel) == 1) { omrade_drill(sel); utb_vald(NULL) }
       } else {
@@ -249,9 +260,17 @@ mod_yh_server <- function(id) {
     }
 
     # ---- Etablering: uppföljningstid och examensår ------------------------------
+    # Gäller både etableringen och arbetsorten. Arbetsorten har inte "Alla år"
+    # (samma person finns i flera uppföljningstider).
+    etabl_vy <- reactive(valt_vy() %in% c("etablering", "arbetsort"))
+    observeEvent(valt_vy(), {
+      if (valt_vy() == "arbetsort" && identical(antal_ar_vald(), "alla")) antal_ar_vald("1")
+    })
     antal_ar_vald <- reactiveVal("1")
     lapply(c("1", "3", "5", "alla"), function(v) {
-      observeEvent(input[[paste0("arbtn_", v)]], { antal_ar_vald(v) }, ignoreInit = TRUE)
+      observeEvent(input[[paste0("arbtn_", v)]], {
+        if (!(v == "alla" && valt_vy() == "arbetsort")) antal_ar_vald(v)
+      }, ignoreInit = TRUE)
     })
     # Examensår som finns för vald uppföljningstid (Alla år: de som finns för
     # alla tre). Uppföljningsår efter YH_SISTA_UPPF_AR är redan bortfiltrerade.
@@ -268,7 +287,7 @@ mod_yh_server <- function(id) {
     })
 
     output$prog_niva_ui <- renderUI({
-      req(valt_vy() == "etablering")
+      req(etabl_vy())
       vald <- antal_ar_vald()
       gor_knapp <- function(v, etikett) {
         actionButton(ns(paste0("arbtn_", v)), etikett,
@@ -280,14 +299,15 @@ mod_yh_server <- function(id) {
           tags$label(class = "control-label", "År efter examen"),
           div(class = "rd-arbtn-rad",
               gor_knapp("1", "1 år"), gor_knapp("3", "3 år"),
-              gor_knapp("5", "5 år"), gor_knapp("alla", "Alla år"))
+              gor_knapp("5", "5 år"),
+              if (valt_vy() != "arbetsort") gor_knapp("alla", "Alla år"))
         ),
         uiOutput(ns("program_filter_ui"))
       )
     })
 
     output$program_filter_ui <- renderUI({
-      req(valt_vy() == "etablering", is.null(omrade_drill()))
+      req(etabl_vy(), is.null(omrade_drill()))
       d_et <- yh_niva(hamta_yh_etablering())
       prg <- sort(unique(stats::na.omit(d_et$program[d_et$geo_niva %in% c("kommun", "lan")])))
       tidigare <- isolate(input$program_filter)
@@ -318,7 +338,7 @@ mod_yh_server <- function(id) {
     output$ar_ui <- renderUI({
       vy <- tryCatch(valt_vy(), error = function(e) "dashboard")
       tidigare <- isolate(input$ar)
-      if (vy == "etablering") {
+      if (vy %in% c("etablering", "arbetsort")) {
         tillg <- examensar_tillg()
         valda <- isolate(input$examensar)
         valda <- if (!is.null(valda) && all(as.integer(valda) %in% tillg)) valda else utils::head(tillg, 3)
@@ -400,10 +420,12 @@ mod_yh_server <- function(id) {
       tillbaka <- if (!is.null(omrade_drill()))
         actionLink(ns("tillbaka"), "\u2190 Alla utbildningsområden", class = "rd-tillbaka")
       hint <- tags$p(class = "rd-hint rd-hint--bar",
-                     if (is.null(omrade_drill()))
+                     if (valt_vy() == "arbetsort")
+                       "Staplarna visar arbetskommunerna. Välj utbildningsområde i filtret till vänster."
+                     else if (is.null(omrade_drill()))
                        "Klicka på ett utbildningsområde för att se dess utbildningar."
                      else "Klicka på en utbildning för att se utvecklingen över tid.")
-      trend_id <- switch(valt_vy(), etablering = "d_etablering_trend",
+      trend_id <- switch(valt_vy(), etablering = "d_etablering_trend", arbetsort = "d_arbetsort_trend",
                          genomstromning = "d_genomstromning_trend", "d_trend")
       fluidRow(
         column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint,
@@ -414,7 +436,7 @@ mod_yh_server <- function(id) {
 
     # ---- Kön: Könsuppdelat (förvalt) eller Totalt ------------------------------
     # Inte för etablering med alla uppföljningstider (redan grupperat på år).
-    kon_mojligt <- reactive(!(valt_vy() == "etablering" && identical(antal_ar_vald(), "alla")))
+    kon_mojligt <- reactive(!(etabl_vy() && identical(antal_ar_vald(), "alla")))
     kon_uppdelat <- reactive(kon_mojligt() && !identical(input$kon_lage, "total"))
     output$kon_kontroll <- renderUI({
       req(kon_mojligt())
@@ -445,6 +467,12 @@ mod_yh_server <- function(id) {
           "\"Visa ofullständiga årgångar\"; årgångar där mer än ", YH_PAGAENDE_VARNING,
           " % pågår markeras."))
       }
+      if (valt_vy() == "arbetsort") {
+        n <- c(n, paste0("Alla utexaminerade räknas, efter kommunen där de har sitt arbetsställe ",
+                         "uppföljningsåret. Studieort = kommunen där utbildningen ges (många läser på ",
+                         "distans och bor på annat håll). Kommuner utanför Dalarna med få personer ",
+                         "slås ihop till \"Övriga utanför Dalarna\"."))
+      }
       if (valt_vy() == "etablering") {
         if (over_bytet())
           n <- c(n, paste0("Valda examensår ligger både före och efter uppföljningsår ",
@@ -460,9 +488,91 @@ mod_yh_server <- function(id) {
       tags$ul(class = "rd-hint", lapply(n, tags$li))
     })
 
+    # ---- Arbetsort ------------------------------------------------------------------
+    # Urval: studieort (kommun eller Dalarna), uppföljningstid, utbildningsområde
+    # (filtret eller området man klickat på i etableringen).
+    arbetsort_urval <- reactive({
+      req(valt_vy() == "arbetsort")
+      d <- geo_filter(hamta_yh_arbetsort()) |>
+        dplyr::filter(antal_ar == as.integer(antal_ar_vald()))
+      pf <- input$program_filter
+      if (!is.null(omrade_drill())) d <- dplyr::filter(d, program == omrade_drill())
+      else if (!is.null(pf) && length(pf) > 0) d <- dplyr::filter(d, program %in% pf)
+      d
+    })
+    # Andel i Dalarna och (vald kommun) i samma kommun som studieorten, per år
+    # eller per år och kön. underlag = alla utexaminerade i gruppen.
+    arbetsort_andelar <- function(d, grupp = NULL) {
+      gv <- input$geo_val
+      d |>
+        dplyr::group_by(dplyr::across(dplyr::all_of(c("ar", grupp)))) |>
+        dplyr::summarise(underlag  = sum(antal),
+                         i_dalarna = sum(antal[ast_i_dalarna]),
+                         i_kommun  = if (is.null(gv) || gv == "_alla_") NA_real_
+                                     else sum(antal[ast_kommunkod %in% gv]),
+                         .groups = "drop") |>
+        dplyr::mutate(andel_dalarna = 100 * i_dalarna / underlag,
+                      andel_kommun  = 100 * i_kommun / underlag)
+    }
+    arbetsort_nyckeltal <- function() {
+      a <- arbetsort_andelar(dplyr::mutate(dplyr::filter(arbetsort_urval(), ar %in% examensar_valda()), ar = 0L))
+      if (nrow(a) == 0 || .dold(a$underlag, MIN_ANTAL) || a$underlag == 0) return(NULL)
+      paste0(scales::number(a$andel_dalarna, accuracy = 1), " % arbetar i Dalarna",
+             if (!is.na(a$andel_kommun))
+               paste0(" \u00b7 ", scales::number(a$andel_kommun, accuracy = 1), " % i ", geo_label()))
+    }
+
+    output$d_arbetsort_trend <- ggiraph::renderGirafe({
+      ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "arbetsort")
+      d <- arbetsort_urval()
+      validate(need(nrow(d) > 0, "Inga data."))
+      gv <- input$geo_val
+      if (kon_uppdelat()) {
+        a <- arbetsort_andelar(dplyr::filter(d, kon %in% c("Kvinna", "Man")), "kon") |>
+          dplyr::transmute(ar, serie = factor(unname(.YH_KON_ETIKETT[kon]), levels = names(KON_FARGER)),
+                           varde = andel_dalarna, underlag)
+        far <- KON_FARGER
+        rub <- "Andel som arbetar i Dalarna"
+      } else {
+        a <- arbetsort_andelar(d)
+        a <- dplyr::bind_rows(
+          dplyr::transmute(a, ar, serie = "I Dalarna", varde = andel_dalarna, underlag),
+          if (!is.null(gv) && gv != "_alla_")
+            dplyr::transmute(a, ar, serie = paste("I", geo_label()), varde = andel_kommun, underlag))
+        a$serie <- factor(a$serie, levels = unique(a$serie))
+        far <- stats::setNames(c(RD_PRIMARY, RD_ACCENT)[seq_along(levels(a$serie))], levels(a$serie))
+        rub <- "Andel som arbetar i Dalarna och i studiekommunen"
+      }
+      skapa_diagram_trend_jmf(a, "Andel (%)", rubrik = rub,
+                              underrubrik = paste0("Studerat i ", geo_label(), " \u00b7 ",
+                                                   antal_ar_vald(), " år efter examen, per examensår"),
+                              kalla = ind$kalla, farger = far)
+    })
+
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
       rub <- paste0(ind$amne, dim_text())
+
+      if (valt_vy() == "arbetsort") {
+        d <- dplyr::filter(arbetsort_urval(), ar %in% examensar_valda())
+        validate(need(nrow(d) > 0, "Inga data för valt urval."))
+        # Dalarnas kommuner var för sig, de största utanför Dalarna, resten ihop.
+        utanfor <- d |> dplyr::filter(!ast_i_dalarna) |> dplyr::group_by(ast_kommun) |>
+          dplyr::summarise(n = sum(antal), .groups = "drop") |>
+          dplyr::slice_max(n, n = 10, with_ties = FALSE) |> dplyr::pull(ast_kommun)
+        d <- d |> dplyr::mutate(
+          program  = dplyr::if_else(ast_i_dalarna | ast_kommun %in% utanfor, ast_kommun,
+                                    "Övriga utanför Dalarna"),
+          kategori = if (kon_uppdelat()) unname(.YH_KON_ETIKETT[kon])
+                     else dplyr::if_else(ast_i_dalarna, "I Dalarna", "Utanför Dalarna"))
+        far <- if (kon_uppdelat()) KON_FARGER else c("I Dalarna" = RD_PRIMARY, "Utanför Dalarna" = "#b9c3ca")
+        nyckel <- arbetsort_nyckeltal()
+        sub <- paste0("Studerat i ", geo_label(), " \u00b7 examensår ", examensar_text(), " \u00b7 ",
+                      antal_ar_vald(), " år efter examen", if (!is.null(nyckel)) paste0("\n", nyckel))
+        return(skapa_diagram_bar_fordelning(d, "kategori", "antal", far, "Antal utexaminerade",
+                                            rubrik = "Arbetskommun efter examen",
+                                            underrubrik = sub, kalla = ind$kalla))
+      }
 
       if (valt_vy() == "etablering") {
         d <- dplyr::filter(yh_etablering_urval(), ar %in% examensar_valda())
@@ -569,6 +679,10 @@ mod_yh_server <- function(id) {
     # Nedladdning: aktuell nivå. Etableringen summeras (se
     # summera_etablering_nedladdning()), genomströmningen får andelarna.
     urval_data <- function() {
+      if (valt_vy() == "arbetsort")
+        return(dplyr::filter(arbetsort_urval(), ar %in% examensar_valda()) |>
+                 dplyr::group_by(kommkod, kommun, program, kon, ast_kommunkod, ast_kommun, ast_i_dalarna) |>
+                 dplyr::summarise(antal = sum(antal), .groups = "drop"))
       if (valt_vy() == "etablering")
         return(summera_etablering_nedladdning(dplyr::filter(yh_etablering_urval(), ar %in% examensar_valda())))
       d <- data_ar()
@@ -583,7 +697,8 @@ mod_yh_server <- function(id) {
       filename = function() "yh_hela_datasetet.xlsx",
       content  = function(file) {
         d <- aktuell_data()
-        if (identical(input$omrade, "etablering")) d <- summera_etablering_nedladdning(d)
+        if (identical(input$omrade, "etablering") && valt_vy() != "arbetsort")
+          d <- summera_etablering_nedladdning(d)
         skriv_gymnasie_excel(d, file, blad = "YH")
       }
     )

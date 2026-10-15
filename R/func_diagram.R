@@ -787,9 +787,10 @@ skapa_diagram_bar_fordelning <- function(df, kategori_kol, metrik, farger, metri
 # d: en rad per (ar, serie) med varde och underlag. serie i önskad ordning
 # (faktor), t.ex. "Falun", "Dalarna", "Riket". Värden vars underlag är under
 # min_antal blir avbrott i linjen.
+# farger: egna färger per serie (namngiven vektor) i stället för standard.
 skapa_diagram_trend_jmf <- function(d, metrik_label, rubrik = NULL, underrubrik = NULL,
                                     kalla = NULL, enhet = " %", min_antal = MIN_ANTAL,
-                                    decimaler = 0.1) {
+                                    decimaler = 0.1, farger = NULL) {
   dolda <- any(.dold(d$underlag, min_antal) & !is.na(d$varde))
   d <- d |>
     dplyr::mutate(
@@ -798,9 +799,11 @@ skapa_diagram_trend_jmf <- function(d, metrik_label, rubrik = NULL, underrubrik 
   if (all(is.na(d$varde))) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
 
   serier <- levels(factor(d$serie))
-  farger <- stats::setNames(rep(RD_PRIMARY, length(serier)), serier)
-  farger[serier == "Dalarna"] <- if (length(serier) > 2) RD_ACCENT else RD_PRIMARY
-  farger[serier == "Riket"]   <- RD_TEXT_MUTED
+  if (is.null(farger)) {
+    farger <- stats::setNames(rep(RD_PRIMARY, length(serier)), serier)
+    farger[serier == "Dalarna"] <- if (length(serier) > 2) RD_ACCENT else RD_PRIMARY
+    farger[serier == "Riket"]   <- RD_TEXT_MUTED
+  }
   linjer <- stats::setNames(ifelse(serier == "Riket", "dashed", "solid"), serier)
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = varde, color = serie, group = serie,
