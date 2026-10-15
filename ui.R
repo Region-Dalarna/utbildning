@@ -42,6 +42,7 @@ shinyUI(
         tabPanel('Folkhögskola',  mod_folkhogskola_ui('folkhogskola')),
         tabPanel('Yrkeshögskola', mod_yh_ui('yh')),
         tabPanel('Högskola',      mod_hogskola_ui('hogskola')),
+        tabPanel('Prognos 2040',  mod_prognos_ui('prognos')),
 
         tabPanel(
           'Om rapporten',
@@ -52,8 +53,9 @@ shinyUI(
                 'högskola, grundskola och folkhögskola.'),
               div(class = 'rd-info',
                   tags$strong('Källa: '),
-                  'Regionala utvecklingsdatabasen (SCB), Skolverket och ',
-                  'Gymnasieantagningen (Dalarnas kommunförbund).'),
+                  'Regionala utvecklingsdatabasen (SCB), Skolverket, ',
+                  'Gymnasieantagningen (Dalarnas kommunförbund) och SCB:s ',
+                  'Regionala trender och prognoser 2025 (RegTop).'),
               p(class = 'rd-hint',
                 'Etablering efter examen bygger på Registerbaserad aktivitetsstatistik ',
                 '(RAKS) och, från och med 2020, Befolkningens arbetsmarknadsstatus (BAS). ',

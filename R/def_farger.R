@@ -55,6 +55,17 @@ KON_FARGER <- c(
   "Män"     = rd_farg("rd-kon-man",     "#459079")
 )
 
+# ---- RegTop: bedömning 2040 (definieras i app.css) -------------------------
+# Ordning 1-7 enligt bedomning_2040_ordning: brist i varma färger, balans grå,
+# överskott i blått.
+REGTOP_BEDOMNINGAR <- c("Stor brist", "Brist", "Viss brist", "Balans",
+                        "Visst överskott", "Överskott", "Stort överskott")
+BEDOMNING_FARGER <- stats::setNames(
+  vapply(1:7, function(i) rd_farg(paste0("rd-bedomning-", i),
+                                  c("#a6361c", "#d9653b", "#f0a875", "#c9d1d6",
+                                    "#8fc3d8", "#3f93b8", "#0f5f86")[i]), character(1)),
+  REGTOP_BEDOMNINGAR)
+
 # ---- Programtyp: RD:s blå vektor (tydligt skild från könsfärgerna) ---------
 PROGRAMTYP_STOPS <- c(
   rd_farg("rd-blue-deep",  "#0074a2"),

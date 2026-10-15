@@ -2,7 +2,7 @@
 
 Shiny-app med utbildningsstatistik för Dalarna (Samhällsanalys, Region Dalarna):
 förskola, grundskola, gymnasiet, komvux (inkl. SFI), folkhögskola,
-yrkeshögskola (YH) och högskola. Datan läses direkt ur databasen.
+yrkeshögskola (YH) och högskola, samt SCB:s prognoser till 2040. Datan läses direkt ur databasen.
 
 ## Filstruktur
 ```
@@ -44,6 +44,7 @@ Indikatorerna definieras i `<skolform>_struktur` överst i respektive modul.
 | Folkhögskola | `oppna_data.mikro_db.folkhogskola_elever` | kurskommun |
 | YH | `oppna_data.mikro_db.yh_studerande`, `yh_genomstromning`, `yh_uppfoljning`, `yh_uppfoljning_arbetsort` | studieort |
 | Högskola | `oppna_data.mikro_db.hogskola_aktivitet`, `hogskola_examen`, `hogskola_etablering` | hemkommun |
+| Prognos 2040 | `oppna_data.regtop.*` (SCB:s Regionala trender och prognoser 2025) | län och riket |
 
 Tabellerna hämtas en gång per R-process och cachas. Komvux och Folkhögskola har
 en kolumn `granularitet`: deltagare (unika individer) får inte summeras över
@@ -55,6 +56,10 @@ i genomströmningen där mer än `YH_PAGAENDE_VARNING` % pågår markeras, och �
 `YH_PAGAENDE_DOLJ` % döljs de som standard. Etableringen räknas bara till och med
 uppföljningsår `YH_SISTA_UPPF_AR`, och bytet av definition vid
 `YH_DEFINITIONSBYTE` markeras.
+
+Prognos 2040 (RegTop) har olika enheter för län och riket i några tabeller
+(summa för perioden respektive årligt genomsnitt). Räkna alltid om med
+`regtop_arligt()` eller `regtop_summa_period()` innan värden jämförs.
 
 I Antagning tolkas inriktning och introduktionsprogrammets varianter ur
 `anskod` (`tolka_anskod()` i `R/func_data.R`). Inriktningskoder som saknar namn

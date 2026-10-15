@@ -8,5 +8,6 @@ shinyServer(function(input, output, session) {
   mod_hogskola_server('hogskola')
   mod_grundskola_server('grundskola')
   mod_folkhogskola_server('folkhogskola')
+  mod_prognos_server('prognos')
 
 })

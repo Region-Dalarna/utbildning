@@ -1,0 +1,206 @@
+# ============================================================
+#  func_diagram_prognos.R
+#  Diagram för fliken Prognos 2040 (RegTop2025, se func_data_regtop.R).
+#  Prognoser markeras alltid: streckade linjer och skuggad prognosperiod.
+# ============================================================
+
+.REGTOP_PROGNOS_FYLL <- "#eef2f5"
+.TILLGANG_FARGER <- c("Tillgång" = RD_PRIMARY, "Efterfrågan" = "#d9653b")
+.fmt_antal <- function(x) scales::number(x, accuracy = 1, big.mark = " ")
+.fmt_proc  <- function(x) paste0(scales::number(x, accuracy = 0.1, decimal.mark = ","), " %")
+
+# ---- Bedömning per utbildningsgrupp -------------------------------------------
+# d: en rad per utbildningsgrupp (bedomning_2040) med har_bedomning. Staplar
+# med balanstalet, färgade efter bedömningen. Klick ger utbildningsgrupp_kod.
+skapa_diagram_bedomning <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
+  d <- dplyr::filter(d, har_bedomning, !is.na(balanstal_procent))
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Ingen bedömning för urvalet"), 6.8, 4))
+  d <- d |>
+    dplyr::mutate(
+      grupp = forcats::fct_reorder(utbildningsgrupp, -as.integer(bedomning_2040) * 1e6 + balanstal_procent),
+      tooltip = paste0(
+        "<b>", utbildningsgrupp, "</b><br/>", bedomning_2040, " 2040 (balanstal ",
+        .fmt_proc(balanstal_procent), ")",
+        "<br/>Tillgång: ", .fmt_antal(tillgang_2023), " (2023) → ", .fmt_antal(tillgang_2040), " (2040)",
+        "<br/>Efterfrågan: ", .fmt_antal(efterfragan_2023), " (2023) → ", .fmt_antal(efterfragan_2040), " (2040)",
+        dplyr::if_else(hansyn_lage_start %in% "Ja" & !is.na(bedomning_start),
+                       paste0("<br/>", bedomning_start), "")))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = balanstal_procent, y = grupp, fill = bedomning_2040)) +
+    ggplot2::geom_vline(xintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = utbildningsgrupp_kod),
+                                  width = 0.75) +
+    ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL,
+                               breaks = intersect(REGTOP_BEDOMNINGAR, as.character(d$bedomning_2040))) +
+    ggplot2::scale_x_continuous(labels = function(x) paste0(x, " %")) +
+    ggplot2::labs(x = "Balanstal 2040: (tillgång - efterfrågan) / efterfrågan", y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top") +
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE))
+  .girafe_std(g, width_svg = 7.5, height_svg = max(4, nrow(d) * 0.24 + 2.2), selection = TRUE)
+}
+
+# Antal utbildningsgrupper per bedömning: valt län jämfört med riket.
+skapa_diagram_bedomning_antal <- function(d, region_namn, rubrik = NULL, kalla = KALLA_REGTOP) {
+  d <- d |>
+    dplyr::filter(har_bedomning) |>
+    dplyr::mutate(serie = dplyr::if_else(regionkod == "00", "Riket", region_namn)) |>
+    dplyr::count(serie, bedomning_2040, .drop = FALSE) |>
+    dplyr::mutate(serie = factor(serie, levels = unique(c(region_namn, "Riket"))),
+                  tooltip = paste0(serie, " · ", bedomning_2040, ": ", n, " utbildningsgrupper"))
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+  farger <- stats::setNames(c(RD_PRIMARY, RD_TEXT_MUTED), c(region_namn, "Riket"))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = bedomning_2040, y = n, fill = serie)) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(serie, bedomning_2040)),
+                                  position = ggplot2::position_dodge2(preserve = "single", padding = 0.1),
+                                  width = 0.75) +
+    ggplot2::scale_fill_manual(values = farger[unique(c(region_namn, "Riket"))], name = NULL) +
+    ggplot2::scale_x_discrete(drop = FALSE, labels = function(x) gsub(" ", "\n", x)) +
+    ggplot2::scale_y_continuous(breaks = function(l) seq(0, ceiling(l[2]), by = max(1, ceiling(l[2] / 5)))) +
+    ggplot2::labs(x = NULL, y = "Antal utbildningsgrupper", title = rubrik,
+                  caption = paste0("Källa: ", kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top", axis.text.x = ggplot2::element_text(size = 7))
+  .girafe_std(g, width_svg = 5, height_svg = 3.4, selection = FALSE)
+}
+
+# ---- Tillgång och efterfrågan över tid ---------------------------------------
+# d: tillgang_efterfragan för en region och grupp (ar, variabel, typ, varde).
+# Historik heldragen, prognos streckad (från sista historiska året).
+skapa_diagram_tillgang_efterfragan <- function(d, rubrik = NULL, underrubrik = NULL,
+                                               kalla = KALLA_REGTOP) {
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.5, 3.6))
+  d <- d |>
+    dplyr::mutate(ar = as.integer(ar),
+                  serie = factor(dplyr::if_else(variabel == "tillgang", "Tillgång", "Efterfrågan"),
+                                 levels = names(.TILLGANG_FARGER)))
+  sista_hist <- max(d$ar[d$typ == "historik"])
+  # Prognoslinjen börjar i sista historiska punkten så att linjerna hänger ihop.
+  prog <- dplyr::bind_rows(
+    dplyr::filter(d, typ == "historik", ar == sista_hist) |> dplyr::mutate(typ = "prognos_start"),
+    dplyr::filter(d, typ == "prognos"))
+  d <- d |> dplyr::mutate(tooltip = paste0(serie, " ", ar, if_else_prognos(typ), ": ", .fmt_antal(varde)))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = varde, colour = serie)) +
+    ggplot2::annotate("rect", xmin = sista_hist + 0.5, xmax = Inf, ymin = -Inf, ymax = Inf,
+                      fill = .REGTOP_PROGNOS_FYLL) +
+    ggplot2::annotate("text", x = sista_hist + 1, y = Inf, label = "Prognos", hjust = 0, vjust = 1.5,
+                      size = 2.8, colour = RD_TEXT_MUTED) +
+    ggplot2::geom_line(data = dplyr::filter(d, typ == "historik"), linewidth = 0.9) +
+    ggplot2::geom_line(data = prog, linewidth = 0.9, linetype = "22") +
+    ggiraph::geom_point_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar),
+                                                 shape = typ), size = 2, fill = "white", stroke = 1) +
+    ggplot2::scale_shape_manual(values = c(historik = 16, prognos = 21), guide = "none") +
+    ggplot2::scale_colour_manual(values = .TILLGANG_FARGER, name = NULL) +
+    ggplot2::scale_x_continuous(breaks = seq(2010, 2040, by = 5)) +
+    ggplot2::scale_y_continuous(labels = .fmt_antal, limits = c(0, NA)) +
+    ggplot2::labs(x = NULL, y = "Antal personer", title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla, "\nStreckat: prognos. Efterfrågan prognostiseras för 2030, 2035 och 2040.")) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+  .girafe_std(g, width_svg = 6.5, height_svg = 3.6, selection = FALSE)
+}
+if_else_prognos <- function(typ) ifelse(typ == "prognos", " (prognos)", "")
+
+# ---- Vattenfall: tillgång 2023 -> faktorer -> tillgång 2040 ----------------------
+# faktorer: tillgångsfaktorerna (faktor_text, varde) som summa för perioden.
+# Skiljer summan sig från tillgång 2040 (avrundning, eller faktorer som saknas)
+# visas skillnaden som en egen stapel, så att diagrammet alltid går ihop.
+skapa_diagram_vattenfall <- function(start, faktorer, slut, rubrik = NULL, underrubrik = NULL,
+                                     kalla = KALLA_REGTOP) {
+  if (is.na(start) || is.na(slut) || nrow(faktorer) == 0)
+    return(.girafe_std(.tom_plot("Ingen framskrivning för gruppen"), 6.5, 3.6))
+  steg <- dplyr::select(faktorer, namn = faktor_text, varde)
+  rest <- slut - start - sum(steg$varde, na.rm = TRUE)
+  if (abs(rest) >= 1) steg <- dplyr::bind_rows(steg, tibble::tibble(namn = "Övrigt och avrundning", varde = rest))
+  d <- dplyr::bind_rows(
+    tibble::tibble(namn = "Tillgång 2023", varde = start, typ = "total", fran = 0, till = start),
+    steg |> dplyr::mutate(typ = dplyr::if_else(varde >= 0, "okning", "minskning"),
+                          till = start + cumsum(varde), fran = till - varde),
+    tibble::tibble(namn = "Tillgång 2040", varde = slut, typ = "total", fran = 0, till = slut)) |>
+    dplyr::mutate(
+      pos = rev(seq_len(dplyr::n())),
+      tooltip = paste0("<b>", namn, "</b><br/>",
+                       dplyr::if_else(typ == "total", .fmt_antal(varde),
+                                      paste0(dplyr::if_else(varde >= 0, "+", ""), .fmt_antal(varde),
+                                             " under 2024–2040"))))
+  farger <- c(total = RD_PRIMARY, okning = "#459079", minskning = "#d9653b")
+  g <- ggplot2::ggplot(d) +
+    ggiraph::geom_rect_interactive(
+      ggplot2::aes(xmin = pmin(fran, till), xmax = pmax(fran, till), ymin = pos - 0.38, ymax = pos + 0.38,
+                   fill = typ, tooltip = tooltip, data_id = namn)) +
+    ggplot2::scale_fill_manual(values = farger, guide = "none") +
+    ggplot2::scale_y_continuous(breaks = d$pos, labels = d$namn) +
+    ggplot2::scale_x_continuous(labels = .fmt_antal) +
+    ggplot2::labs(x = "Antal personer", y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla, "\nGrönt ökar och orange minskar tillgången.")) +
+    .rd_tema()
+  .girafe_std(g, width_svg = 6.5, height_svg = 3.6, selection = FALSE)
+}
+
+# ---- Efterfrågefaktorer (procent) -------------------------------------------------
+skapa_diagram_efterfragan_faktorer <- function(d, rubrik = NULL, underrubrik = NULL,
+                                               kalla = KALLA_REGTOP) {
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.2))
+  d <- d |> dplyr::mutate(
+    faktor_text = forcats::fct_rev(factor(faktor_text, levels = unique(faktor_text))),
+    tooltip = paste0("<b>", faktor_text, "</b><br/>", dplyr::if_else(varde >= 0, "+", ""), .fmt_proc(varde)),
+    riktning = dplyr::if_else(varde >= 0, "okning", "minskning"))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = faktor_text, fill = riktning)) +
+    ggplot2::geom_vline(xintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = faktor_text), width = 0.6) +
+    ggplot2::scale_fill_manual(values = c(okning = "#459079", minskning = "#d9653b"), guide = "none") +
+    ggplot2::scale_x_continuous(labels = function(x) paste0(x, " %")) +
+    ggplot2::labs(x = "Påverkan på efterfrågan 2023–2040", y = NULL, title = rubrik,
+                  subtitle = underrubrik, caption = paste0("Källa: ", kalla)) +
+    .rd_tema()
+  .girafe_std(g, width_svg = 5, height_svg = 3.2, selection = FALSE)
+}
+
+# ---- Arbetskraften per kön 2023 och 2040 ------------------------------------------
+skapa_diagram_arbetskraft_kon <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.2))
+  d <- d |> dplyr::mutate(
+    ar_text = paste0(ar, if_else_prognos(typ)),
+    ar_text = factor(ar_text, levels = unique(ar_text[order(ar)])),
+    kon = factor(kon, levels = names(KON_FARGER)),
+    tooltip = paste0(kon, " ", ar_text, ": ", .fmt_antal(varde)))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar_text, y = varde, fill = kon)) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(kon, ar)),
+                                  position = ggplot2::position_dodge(width = 0.8), width = 0.75) +
+    ggplot2::scale_fill_manual(values = KON_FARGER, name = NULL) +
+    ggplot2::scale_y_continuous(labels = .fmt_antal) +
+    ggplot2::labs(x = NULL, y = "Antal i arbetskraften", title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top")
+  .girafe_std(g, width_svg = 5, height_svg = 3.2, selection = FALSE)
+}
+
+# ---- Samma utbildningsgrupp i alla län ---------------------------------------------
+# d: bedömningsraderna för en grupp i alla län (och riket). Valt län markeras,
+# riket som streckad linje.
+skapa_diagram_bedomning_lan <- function(d, vald_regionkod, rubrik = NULL, underrubrik = NULL,
+                                        kalla = KALLA_REGTOP) {
+  riket <- d$balanstal_procent[d$regionkod == "00" & d$har_bedomning]
+  d <- dplyr::filter(d, regionkod != "00", har_bedomning, !is.na(balanstal_procent))
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Ingen bedömning i något län"), 5, 4))
+  d <- d |> dplyr::mutate(
+    lan = forcats::fct_reorder(region, balanstal_procent),
+    alfa = dplyr::if_else(regionkod == vald_regionkod, 1, 0.5),
+    tooltip = paste0("<b>", region, "</b><br/>", bedomning_2040, " (", .fmt_proc(balanstal_procent), ")"))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = balanstal_procent, y = lan, fill = bedomning_2040)) +
+    ggplot2::geom_vline(xintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = regionkod, alpha = alfa),
+                                  width = 0.75) +
+    ggplot2::scale_alpha_identity() +
+    ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, guide = "none") +
+    ggplot2::scale_x_continuous(labels = function(x) paste0(x, " %")) +
+    ggplot2::labs(x = "Balanstal 2040", y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla, if (length(riket) == 1) "\nStreckat: riket." else "")) +
+    .rd_tema()
+  if (length(riket) == 1)
+    g <- g + ggplot2::geom_vline(xintercept = riket, linetype = "dashed", colour = RD_TEXT_MUTED)
+  .girafe_std(g, width_svg = 5, height_svg = max(3.5, nrow(d) * 0.2 + 1.6), selection = FALSE)
+}

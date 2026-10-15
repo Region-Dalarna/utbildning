@@ -11,6 +11,14 @@
 :root {
   --rd-kon-kvinnor: #e2a855;   /* kvinnor/flickor */
   --rd-kon-man:     #459079;   /* män/pojkar */
+  /* RegTop: bedömning 2040, från stor brist till stort överskott */
+  --rd-bedomning-1: #a6361c;
+  --rd-bedomning-2: #d9653b;
+  --rd-bedomning-3: #f0a875;
+  --rd-bedomning-4: #c9d1d6;
+  --rd-bedomning-5: #8fc3d8;
+  --rd-bedomning-6: #3f93b8;
+  --rd-bedomning-7: #0f5f86;
   --rd-kommun-fyll: #a9d4e0;   /* enfärgade kommuner i kartan (kommunläge) */
 }
 
@@ -245,3 +253,7 @@ html, body { overflow-x: hidden; }
 
 /* ---- Tillbaka-länk vid nedborrning (t.ex. program -> inriktning) ------ */
 .rd-tillbaka { display: inline-block; margin: 0 0 6px 4px; font-size: 0.85rem; font-weight: 500; }
+
+/* Prognos 2040: rubrik för vald utbildningsgrupp */
+.rd-rubrik-grupp { margin: 8px 0 12px; font-size: 1.35rem; }
+.rd-rubrik-grupp small { color: var(--rd-text-muted); font-size: 0.9rem; }
