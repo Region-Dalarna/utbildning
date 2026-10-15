@@ -407,9 +407,23 @@ mod_yh_server <- function(id) {
                          genomstromning = "d_genomstromning_trend", "d_trend")
       fluidRow(
         column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint,
-               uiOutput(ns("notiser"))),
+               uiOutput(ns("kon_kontroll")), uiOutput(ns("notiser"))),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns(trend_id), height = "380px")))
       )
+    })
+
+    # ---- Kön: Könsuppdelat (förvalt) eller Totalt ------------------------------
+    # Inte för etablering med alla uppföljningstider (redan grupperat på år).
+    kon_mojligt <- reactive(!(valt_vy() == "etablering" && identical(antal_ar_vald(), "alla")))
+    kon_uppdelat <- reactive(kon_mojligt() && !identical(input$kon_lage, "total"))
+    output$kon_kontroll <- renderUI({
+      req(kon_mojligt())
+      div(class = "rd-kon-kontroll",
+          shinyWidgets::radioGroupButtons(
+            inputId = ns("kon_lage"), label = NULL,
+            choices = c("Könsuppdelat" = "kon", "Totalt" = "total"),
+            selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+            size = "sm"))
     })
 
     output$notiser <- renderUI({
@@ -455,6 +469,21 @@ mod_yh_server <- function(id) {
         validate(need(nrow(d) > 0, "Inga data för valt urval."))
         d <- storsta(d, "antal")
         sub <- paste0(filter_underrubrik(), " \u00b7 examensår ", examensar_text())
+        if (kon_uppdelat()) {
+          # Grupperade staplar per kön (andel ur summorna, viktad på antal).
+          s <- d |>
+            dplyr::filter(antal_ar == as.integer(antal_ar_vald()), kon %in% c("Kvinna", "Man")) |>
+            dplyr::group_by(namn, kon) |>
+            dplyr::summarise(m = sum(.data[[ind$metrik]], na.rm = TRUE),
+                             antal = sum(antal, na.rm = TRUE), .groups = "drop") |>
+            dplyr::mutate(andel = dplyr::if_else(antal > 0, 100 * m / antal, NA_real_),
+                          geo_niva = "kommun", kommun = namn, kommkod = namn, program = kon)
+          validate(need(nrow(s) > 0, "Inga data för valt urval."))
+          return(skapa_diagram_andel_omrade_kon(
+            s, "andel", "antal", ind$metrik_label, vald_kommkod = utb_vald(),
+            rubrik = rub, underrubrik = paste0(sub, " \u00b7 ", antal_ar_vald(), " år efter examen"),
+            kalla = ind$kalla))
+        }
         skapa_diagram_etablering_bar(d, ind$metrik, ind$metrik_label,
                                      antal_ar_val = antal_ar_vald(),
                                      riket_andel = yh_etablering_riket_andel(),
@@ -469,13 +498,18 @@ mod_yh_server <- function(id) {
           d, input$ar, visa_ofullstandiga = visa_ofullstandiga(),
           riket_andel = if (nrow(r) == 1 && (visa_ofullstandiga() || r$status != "ofullstandig")) r$andel,
           rubrik = rub, underrubrik = paste0(geo_label(), " \u00b7 startår ", input$ar),
-          kalla = ind$kalla)
+          kalla = ind$kalla, per_kon = kon_uppdelat())
       } else {
         df <- storsta(data_ar(), ind$metrik)
         validate(need(nrow(df) > 0, "Inga data för valt urval."))
-        skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
-                          rubrik = rub, underrubrik = filter_underrubrik(med_ar = TRUE),
-                          kalla = ind$kalla)
+        if (kon_uppdelat())
+          skapa_diagram_bar_kon(yh_kon_bred(df, ind$metrik), "m_kv", "m_man", ind$metrik_label, input$ar,
+                                rubrik = rub, underrubrik = filter_underrubrik(med_ar = TRUE),
+                                kalla = ind$kalla)
+        else
+          skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
+                            rubrik = rub, underrubrik = filter_underrubrik(med_ar = TRUE),
+                            kalla = ind$kalla)
       }
     })
 
@@ -495,13 +529,23 @@ mod_yh_server <- function(id) {
         df, yh_etablering_riket_serie(), ind$metrik, ind$metrik_label, antal_ar_v,
         serie_namn = geo_label(), rubrik = trend_rubrik(ind),
         underrubrik = paste0(geo_label(), " \u00b7 ", antal_ar_v, " år efter examen"),
-        kalla = ind$kalla)
+        kalla = ind$kalla, per_kon = kon_uppdelat())
     })
 
     output$d_genomstromning_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "genomstromning")
       u <- gs_urval_ar()
       validate(need(nrow(u) > 0, "Inga data."))
+      if (kon_uppdelat()) {
+        # En linje per kön; skuggningen följer hela urvalets status.
+        d <- trend_niva(geo_filter(hamta_yh_genomstromning())) |>
+          dplyr::filter(kon %in% c("Kvinna", "Man")) |>
+          yh_genomstromning_summera(grupp = "kon") |>
+          dplyr::mutate(serie = factor(unname(.YH_KON_ETIKETT[kon]), levels = names(KON_FARGER)))
+        return(skapa_diagram_yh_genomstromning_trend(
+          d, visa_ofullstandiga(), rubrik = trend_rubrik(ind), underrubrik = geo_label(),
+          kalla = ind$kalla, farger = KON_FARGER, status_ar = u))
+      }
       r <- genomstromning_riket_yh(hamta_yh_genomstromning(), omrade_drill(), utb_vald())
       d <- dplyr::bind_rows(dplyr::mutate(u, serie = geo_label()), dplyr::mutate(r, serie = "Riket"))
       skapa_diagram_yh_genomstromning_trend(d, visa_ofullstandiga(), rubrik = trend_rubrik(ind),
@@ -513,6 +557,10 @@ mod_yh_server <- function(id) {
       ind <- valt_indikator(); req(isTRUE(ind$klar))
       df <- trend_niva(data_bas())
       validate(need(nrow(df) > 0, "Inga data."))
+      if (kon_uppdelat())
+        return(skapa_diagram_trend_kon(yh_kon_bred(df, ind$metrik), "m_kv", "m_man", ind$metrik_label, NULL,
+                                       rubrik = trend_rubrik(ind), underrubrik = filter_underrubrik(),
+                                       kalla = ind$kalla))
       skapa_diagram_trend(df, ind$metrik, ind$metrik_label, NULL,
                           rubrik = trend_rubrik(ind), underrubrik = filter_underrubrik(),
                           kalla = ind$kalla)

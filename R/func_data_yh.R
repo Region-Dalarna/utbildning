@@ -15,7 +15,8 @@
 #  utbildningarna (små utbildningsceller döljs, då blir summan för låg).
 #
 #  Tabellerna har en korrekt geo_niva (riket/lan/kommun) och en färdig
-#  länsrad (regionkod "20"). Kön, studieform och Match summeras ihop.
+#  länsrad (regionkod "20"). Kön behålls (kolumnen kon, Kvinna/Man) - det
+#  som inte delas på kön summeras över den. Studieform och Match summeras ihop.
 #  "program" = utbildningsområde (diagramfunktionernas kolumnkontrakt).
 # ============================================================
 
@@ -57,6 +58,15 @@ yh_niva <- function(d, omrade = NULL) {
   d
 }
 
+# Kvinnor och män i var sin kolumn (m_kv, m_man) för de könsuppdelade
+# diagramfunktionerna (skapa_diagram_bar_kon() m.fl.).
+yh_kon_bred <- function(d, metrik) {
+  dplyr::mutate(d,
+    m_kv  = dplyr::if_else(kon %in% "Kvinna", as.numeric(.data[[metrik]]), 0),
+    m_man = dplyr::if_else(kon %in% "Man",    as.numeric(.data[[metrik]]), 0))
+}
+.YH_KON_ETIKETT <- c("Kvinna" = "Kvinnor", "Man" = "Män")
+
 # ---- Studerande --------------------------------------------------------
 .yh_studerande_cache <- new.env(parent = emptyenv())
 
@@ -68,7 +78,8 @@ rensa_yh_studerande <- function(rad) {
       program = utbildningsomrade
     ) |>
     dplyr::mutate(ar = as.integer(ar), kommkod = as.character(kommkod)) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, granularitet, program, utbildningsnamn) |>
+    dplyr::group_by(dplyr::across(dplyr::any_of(c("ar", "kommkod", "kommun", "geo_niva", "granularitet",
+                                                  "program", "utbildningsnamn", "kon")))) |>
     dplyr::summarise(
       dplyr::across(dplyr::any_of(c("paborjad", "pagaende", "avslutad", "examen",
                                     "avslutad_utan_examen", "resultat_saknas")),
@@ -98,7 +109,8 @@ rensa_yh_genomstromning <- function(rad) {
       program = utbildningsomrade
     ) |>
     dplyr::mutate(ar = as.integer(ar), kommkod = as.character(kommkod)) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, granularitet, program, utbildningsnamn) |>
+    dplyr::group_by(dplyr::across(dplyr::any_of(c("ar", "kommkod", "kommun", "geo_niva", "granularitet",
+                                                  "program", "utbildningsnamn", "kon")))) |>
     dplyr::summarise(
       dplyr::across(c(paborjade, avslutade, examen, avslutad_utan_examen,
                       resultat_saknas, pagaende_kvar),
@@ -173,8 +185,9 @@ rensa_yh_etablering <- function(rad) {
       ar       = as.integer(substr(exam_ar_interval, 1, 4)),
       antal_ar = as.integer(antal_ar)
     ) |>
-    dplyr::group_by(ar, exam_ar_interval, uppf_ar_interval, antal_ar,
-                    kommkod, kommun, geo_niva, granularitet, program, utbildningsnamn) |>
+    dplyr::group_by(dplyr::across(dplyr::any_of(c(
+      "ar", "exam_ar_interval", "uppf_ar_interval", "antal_ar", "kommkod", "kommun", "geo_niva",
+      "granularitet", "program", "utbildningsnamn", "kon")))) |>
     dplyr::summarise(
       dplyr::across(c(syss, stud, arblos, ovriga, antal, etabl,
                       etabl_med_inkomst, inkomst_summa),
