@@ -1105,7 +1105,12 @@ mod_gymnasiet_server <- function(id) {
     # summera_etablering_nedladdning()). Övrig data i fliken är publicerad
     # statistik (gymnasieantagningen, Skolverket) - därför min_antal = 0.
     nedladdning <- function(d) {
-      if (identical(input$omrade, "etablering")) summera_etablering_nedladdning(d) else d
+      if (identical(input$omrade, "etablering")) return(summera_etablering_nedladdning(d))
+      # Genomströmning: prickade värden (NA från Skolverket) förklaras i en egen kolumn.
+      if (identical(input$omrade, "resultat") && "andel" %in% names(d))
+        d <- dplyr::mutate(d, kommentar = dplyr::if_else(is.na(andel), "uppgift saknas (för få elever)",
+                                                         NA_character_))
+      d
     }
 
     output$ladda_ner <- downloadHandler(
