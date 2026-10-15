@@ -203,7 +203,15 @@ mod_gymnasiet_ui <- function(id) {
           options = shinyWidgets::pickerOptions(liveSearch = TRUE, selectedTextFormat = "count > 3",
                                                 countSelectedText = "{0} områden valda")
         ),
-        tags$p(class = "rd-hint", "Välj flera i listan, eller Ctrl-klicka (Cmd på Mac) i kartan."),
+        tags$p(class = "rd-hint", "Välj flera med Ctrl-klick (Cmd på Mac) i listan eller kartan."),
+        # Talar om för servern om klicket i listrutan gjordes med Ctrl/Cmd
+        # (fångas före bootstrap-selects egen klickhantering).
+        tags$script(HTML(sprintf(
+          "document.addEventListener('click', function(e) {
+             var bs = e.target.closest && e.target.closest('.bootstrap-select');
+             if (bs && bs.querySelector('select#%s') && e.target.closest('.dropdown-menu'))
+               Shiny.setInputValue('%s', e.ctrlKey || e.metaKey, {priority: 'event'});
+           }, true);", ns("geo_val"), ns("geo_val_ctrl")))),
         uiOutput(ns("org_ui")),
         uiOutput(ns("ar_ui")),
 
@@ -535,11 +543,18 @@ mod_gymnasiet_server <- function(id) {
       session$sendCustomMessage(paste0(ns("karta"), "_set"), as.list(karta_ids(gv)))
     }
 
-    # Listrutan: "Hela Dalarna" utesluter övriga val. Väljs ett område när
-    # Hela Dalarna är valt tas Hela Dalarna bort, och tvärtom.
+    # Listrutan fungerar som kartan: vanligt klick väljer bara det området
+    # (klick på enda valda -> Hela Dalarna), Ctrl/Cmd-klick lägger till eller
+    # tar bort. "Hela Dalarna" utesluter övriga val.
     observeEvent(input$geo_val, {
       sel   <- input$geo_val
       forra <- geo_vald_rv()
+      klickad <- union(setdiff(sel, forra), setdiff(forra, sel))
+      if (length(klickad) == 1 && !isTRUE(isolate(input$geo_val_ctrl))) {
+        sel <- if (klickad %in% sel) klickad                     # valt: bara det
+               else if (setequal(forra, klickad)) "_alla_"       # enda valda avmarkerat
+               else klickad                                      # ett av flera: bara det
+      }
       ny <- if (length(sel) == 0) "_alla_"
             else if ("_alla_" %in% sel && length(sel) > 1)
               (if ("_alla_" %in% forra) setdiff(sel, "_alla_") else "_alla_")
