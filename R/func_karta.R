@@ -38,9 +38,9 @@
   dplyr::left_join(geo, kommun_samverkan, by = "kommkod")
 }
 
-# Sveriges län (för Prognos 2040): kommunerna i hela landet slås ihop per
-# län (de två första siffrorna i kommunkoden) och förenklas, så att kartan
-# blir lätt att rita. Läses en gång per R-process.
+# Sveriges län (för Prognos 2040) ur karta.lan_scb. Kodkolumnens namn tas
+# bland de vanliga; saknas tabellen slås kommunerna (kommun_scb) ihop per län.
+# Gränserna förenklas så att kartan blir lätt att rita. En gång per R-process.
 .las_lan_geometri <- function() {
   if (!requireNamespace("sf", quietly = TRUE)) {
     .geo_cache$fel_lan <- "paketet sf är inte installerat"
@@ -50,14 +50,20 @@
     con <- shiny_uppkoppling_las("geodata")
     if (is.null(con)) stop("kunde inte koppla upp mot geodata-databasen")
     on.exit(DBI::dbDisconnect(con), add = TRUE)
-    geo <- dplyr::tbl(con, dbplyr::in_schema("karta", "kommun_scb")) |>
-      dplyr::collect() |>
-      df_till_sf()
+    geo <- tryCatch({
+      g <- dplyr::tbl(con, dbplyr::in_schema("karta", "lan_scb")) |> dplyr::collect() |> df_till_sf()
+      kol <- intersect(c("lnkod", "lankod", "lan_kod", "regionkod", "lanskod", "kod"), names(g))[1]
+      if (is.na(kol)) stop("hittar ingen kodkolumn i lan_scb")
+      g |> dplyr::mutate(regionkod = sprintf("%02d", as.integer(.data[[kol]]))) |>
+        dplyr::select(regionkod)
+    }, error = function(e) {
+      message("lan_scb kunde inte läsas (", conditionMessage(e), ") - slår ihop kommunerna i stället.")
+      dplyr::tbl(con, dbplyr::in_schema("karta", "kommun_scb")) |> dplyr::collect() |> df_till_sf() |>
+        dplyr::mutate(regionkod = substr(as.character(knkod), 1, 2)) |>
+        dplyr::group_by(regionkod) |> dplyr::summarise(.groups = "drop")
+    })
     if (isTRUE(sf::st_is_longlat(geo))) geo <- sf::st_transform(geo, 3006)
     geo |>
-      dplyr::mutate(regionkod = substr(as.character(knkod), 1, 2)) |>
-      dplyr::group_by(regionkod) |>
-      dplyr::summarise(.groups = "drop") |>
       sf::st_simplify(dTolerance = 1500, preserveTopology = TRUE) |>
       sf::st_transform(crs = 4326)
   }, error = function(e) {

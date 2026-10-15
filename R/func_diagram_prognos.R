@@ -239,3 +239,125 @@ skapa_karta_bedomning <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, 
                    legend.position = "right")
   .girafe_std(g, width_svg = 4.6, height_svg = 6, selection = TRUE)
 }
+
+# ---- Historik och prognosperioder över tid ---------------------------------------
+# d: regtop_period_summa() (ar_fran, ar_till, typ, varde), ev. kolumnen serie.
+# Historik som linje per år; prognosperioder som streckade vågräta streck
+# över periodens år (årligt genomsnitt), i skuggat prognosfält.
+skapa_diagram_prognos_tid <- function(d, y_label = "Antal per år", rubrik = NULL, underrubrik = NULL,
+                                      kalla = KALLA_REGTOP, farger = NULL) {
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.5, 3.6))
+  if (!"serie" %in% names(d)) d$serie <- "Totalt"
+  d$serie <- factor(d$serie, levels = unique(d$serie))
+  if (is.null(farger)) farger <- stats::setNames(c(RD_PRIMARY, RD_TEXT_MUTED, RD_ACCENT)[seq_along(levels(d$serie))],
+                                                 levels(d$serie))
+  hist <- dplyr::filter(d, typ == "historik") |>
+    dplyr::mutate(tooltip = paste0(serie, " ", period, ": ", .fmt_antal(varde)))
+  prog <- dplyr::filter(d, typ == "prognos") |>
+    dplyr::mutate(mitt = (ar_fran + ar_till) / 2,
+                  tooltip = paste0(serie, " ", period, " (prognos): ", .fmt_antal(varde), " per år"))
+  g <- ggplot2::ggplot()
+  if (nrow(prog) > 0)
+    g <- g +
+      ggplot2::annotate("rect", xmin = min(prog$ar_fran) - 0.5, xmax = max(prog$ar_till) + 0.5,
+                        ymin = -Inf, ymax = Inf, fill = .REGTOP_PROGNOS_FYLL) +
+      ggplot2::annotate("text", x = min(prog$ar_fran), y = Inf, label = "Prognos", hjust = 0, vjust = 1.5,
+                        size = 2.8, colour = RD_TEXT_MUTED) +
+      ggplot2::geom_segment(data = prog, ggplot2::aes(x = ar_fran - 0.5, xend = ar_till + 0.5, y = varde,
+                                                      yend = varde, colour = serie),
+                            linewidth = 1, linetype = "22") +
+      ggiraph::geom_point_interactive(data = prog, ggplot2::aes(x = mitt, y = varde, colour = serie,
+                                                                tooltip = tooltip, data_id = paste(serie, period)),
+                                      shape = 21, fill = "white", size = 2.2, stroke = 1)
+  if (nrow(hist) > 0)
+    g <- g +
+      ggplot2::geom_line(data = hist, ggplot2::aes(x = ar_fran, y = varde, colour = serie), linewidth = 0.9) +
+      ggiraph::geom_point_interactive(data = hist, ggplot2::aes(x = ar_fran, y = varde, colour = serie,
+                                                                tooltip = tooltip, data_id = paste(serie, period)),
+                                      size = 1.8)
+  alla_ar <- c(d$ar_fran, d$ar_till)
+  g <- g +
+    ggplot2::scale_colour_manual(values = farger, name = NULL,
+                                 guide = if (length(farger) > 1) "legend" else "none") +
+    ggplot2::scale_x_continuous(breaks = seq(5 * floor(min(alla_ar) / 5), max(alla_ar), by = 5)) +
+    ggplot2::scale_y_continuous(labels = .fmt_antal, limits = c(0, NA)) +
+    ggplot2::labs(x = NULL, y = y_label, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla, "\nPrognosperioderna visas som årligt genomsnitt (streckat).")) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+  .girafe_std(g, width_svg = 6.5, height_svg = 3.6, selection = FALSE)
+}
+
+# ---- Senaste historiska år jämfört med en prognosperiod -----------------------------
+# d: kategori, hist, prog (årligt genomsnitt). Klick ger kategorin.
+skapa_diagram_prognos_jmf <- function(d, hist_label, prog_label, x_label = "Antal per år",
+                                      rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
+  d <- dplyr::filter(d, !is.na(hist) | !is.na(prog))
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 5))
+  ordning <- d$kategori[order(dplyr::coalesce(d$prog, d$hist))]
+  lang <- d |>
+    tidyr::pivot_longer(c(hist, prog), names_to = "serie", values_to = "varde") |>
+    dplyr::filter(!is.na(varde)) |>
+    dplyr::mutate(serie = factor(dplyr::if_else(serie == "hist", hist_label, prog_label),
+                                 levels = c(hist_label, prog_label)),
+                  kategori = factor(kategori, levels = ordning),
+                  tooltip = paste0("<b>", kategori, "</b><br/>", serie, ": ", .fmt_antal(varde)))
+  farger <- stats::setNames(c(RD_PRIMARY, "#8edded"), c(hist_label, prog_label))
+  g <- ggplot2::ggplot(lang, ggplot2::aes(x = varde, y = kategori, fill = serie)) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = as.character(kategori)),
+                                  position = ggplot2::position_dodge2(preserve = "single", reverse = TRUE,
+                                                                      padding = 0.1), width = 0.75) +
+    ggplot2::scale_fill_manual(values = farger, name = NULL) +
+    ggplot2::scale_x_continuous(labels = .fmt_antal, expand = ggplot2::expansion(mult = c(0, 0.04))) +
+    ggplot2::labs(x = x_label, y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top")
+  .girafe_std(g, width_svg = 7, height_svg = max(4, nrow(d) * 0.4 + 2), selection = TRUE)
+}
+
+# ---- Vägar in i yrket: examination per utbildningsform -------------------------------
+REGTOP_UTBFORM_FARGER <- c(
+  "Gymnasieskola" = RD_PRIMARY, "Komvux" = "#54a1bd", "Arbetsmarknadsutbildning" = "#8edded",
+  "Yrkeshögskola" = "#459079", "Högskola, generell examen" = "#0f5f86",
+  "Högskola, yrkesexamen" = "#d9653b", "Övrig examination" = "#b9c3ca")
+
+# d: period, form (visningstext), varde (årligt genomsnitt). Staplat per period.
+skapa_diagram_vagar <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
+  d <- dplyr::filter(d, !is.na(varde), varde != 0)
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Ingen prognos för gruppen"), 6.5, 4))
+  d <- d |> dplyr::mutate(
+    form = factor(form, levels = rev(names(REGTOP_UTBFORM_FARGER))),
+    tooltip = paste0("<b>", form, "</b><br/>", period, ": ", .fmt_antal(varde), " per år"))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = period, y = varde, fill = form)) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(period, form)), width = 0.6) +
+    ggplot2::scale_fill_manual(values = REGTOP_UTBFORM_FARGER, name = NULL,
+                               breaks = intersect(names(REGTOP_UTBFORM_FARGER), as.character(d$form))) +
+    ggplot2::scale_y_continuous(labels = .fmt_antal) +
+    ggplot2::labs(x = "Prognosperiod", y = "Examinerade per år", title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "right")
+  .girafe_std(g, width_svg = 7, height_svg = 4, selection = FALSE)
+}
+
+# d: serie (län/riket), form, varde. Andel per utbildningsform, 100 % per serie.
+skapa_diagram_vagar_andel <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
+  d <- d |> dplyr::filter(!is.na(varde), varde > 0) |>
+    dplyr::group_by(serie) |> dplyr::mutate(andel = varde / sum(varde)) |> dplyr::ungroup()
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Ingen prognos för gruppen"), 5, 3))
+  d <- d |> dplyr::mutate(
+    form = factor(form, levels = rev(names(REGTOP_UTBFORM_FARGER))),
+    # Valt län överst, riket under.
+    serie = factor(serie, levels = c("Riket", setdiff(unique(serie), "Riket"))),
+    tooltip = paste0("<b>", serie, "</b><br/>", form, ": ", scales::percent(andel, accuracy = 1)))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = serie, fill = form)) +
+    ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(serie, form)), width = 0.6) +
+    ggplot2::scale_fill_manual(values = REGTOP_UTBFORM_FARGER, guide = "none") +
+    ggplot2::scale_x_continuous(labels = scales::percent) +
+    ggplot2::labs(x = NULL, y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla)) +
+    .rd_tema()
+  .girafe_std(g, width_svg = 5, height_svg = 2.6, selection = FALSE)
+}

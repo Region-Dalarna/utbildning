@@ -116,3 +116,59 @@ regtop_vanligaste_yrken <- function(regionkod, kod) {
   else ""
   unique(paste0(d[[yrke_kol]], tillagg))
 }
+
+# ---- Perioder, kön och summering --------------------------------------------------
+# Tabeller med både enskilda år och perioder: ar är text ("2019", "2024-2030")
+# med ar_fran/ar_till. Fyller ar_fran/ar_till ur ar om de saknas.
+.regtop_perioder <- function(d) {
+  if (!"ar_fran" %in% names(d)) d$ar_fran <- NA_integer_
+  if (!"ar_till" %in% names(d)) d$ar_till <- NA_integer_
+  ar <- as.character(d$ar)
+  d$ar_fran <- dplyr::coalesce(as.integer(d$ar_fran), as.integer(substr(ar, 1, 4)))
+  d$ar_till <- dplyr::coalesce(as.integer(d$ar_till), as.integer(sub("^.*-", "", ar)))
+  d
+}
+
+# Kön: finns en totalrad används den, annars summeras kvinnor och män nedströms.
+REGTOP_KON_TOTAL <- c("Totalt", "Båda könen", "Kvinnor och män", "Samtliga")
+regtop_kon_total <- function(d) {
+  if (!"kon" %in% names(d) || !any(d$kon %in% REGTOP_KON_TOTAL)) return(d)
+  dplyr::filter(d, kon %in% REGTOP_KON_TOTAL)
+}
+
+# Summerar till en rad per (grupp, period, typ) som årligt genomsnitt, med
+# en läsbar periodtext ("2023", "2031–2035").
+regtop_period_summa <- function(d, grupp = NULL) {
+  d |>
+    .regtop_perioder() |>
+    regtop_arligt() |>
+    regtop_kon_total() |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(c(grupp, "ar_fran", "ar_till", "typ")))) |>
+    dplyr::summarise(varde = sum(varde, na.rm = TRUE), .groups = "drop") |>
+    dplyr::mutate(period = dplyr::if_else(ar_fran == ar_till, as.character(ar_fran),
+                                          paste0(ar_fran, "–", ar_till)))
+}
+
+# ---- Utbildningsformer (examination_utbildningsform) ---------------------------
+REGTOP_UTBFORM_TEXT <- c(
+  gymnasieskola            = "Gymnasieskola",
+  komvux                   = "Komvux",
+  arbetsmarknadsutbildning = "Arbetsmarknadsutbildning",
+  yrkeshogskola            = "Yrkeshögskola",
+  generell_examen_hogskola = "Högskola, generell examen",
+  yrkesexamen_hogskola     = "Högskola, yrkesexamen",
+  ovrig_examination        = "Övrig examination"
+)
+
+# ---- Eftergymnasialt (eftergymnasial) ------------------------------------------------
+# Indikatorerna: utbildningsform + mått. nyborjare finns bara för riket.
+REGTOP_EFTERGYMN <- list(
+  yh_antagna     = list(label = "YH, antagna", utbildningsform = "yrkeshogskola", matt = "antagna"),
+  yh_examinerade = list(label = "YH, examinerade", utbildningsform = "yrkeshogskola", matt = "examinerade"),
+  hs_yrkesexamen = list(label = "Högskola, yrkesexamen", utbildningsform = "hogskola_yrkesexamen",
+                        matt = "examinerade"),
+  hs_generell    = list(label = "Högskola, generell examen", utbildningsform = "hogskola_generell_examen",
+                        matt = "examinerade"),
+  hs_nyborjare   = list(label = "Högskola, nybörjare (riket)", utbildningsform = "hogskola_yrkesexamen",
+                        matt = "nyborjare", bara_riket = TRUE)
+)
