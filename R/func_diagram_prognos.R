@@ -211,20 +211,37 @@ skapa_diagram_bedomning_lan <- function(d, vald_regionkod, rubrik = NULL, underr
 # geo: länens geometri (hamta_lan_geometri()), d: bedömningsraderna för en
 # utbildningsgrupp i alla län. Län utan prognos grå. Klick ger regionkod.
 REGTOP_SAKNAS_FARG <- "#e9ecef"
-skapa_karta_bedomning <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, kalla = KALLA_REGTOP) {
+
+# Tre klasser som i SCB:s rapport: viss brist/brist/stor brist = Brist,
+# visst överskott/överskott/stort överskott = Överskott.
+REGTOP_KLASS3 <- c("Brist", "Balans", "Överskott")
+KLASS3_FARGER <- c("Brist" = BEDOMNING_FARGER[["Brist"]], "Balans" = BEDOMNING_FARGER[["Balans"]],
+                   "Överskott" = BEDOMNING_FARGER[["Överskott"]])
+regtop_klass3 <- function(bedomning) {
+  o <- match(as.character(bedomning), REGTOP_BEDOMNINGAR)
+  dplyr::case_when(is.na(o) ~ NA_character_, o < 4 ~ "Brist", o == 4 ~ "Balans", TRUE ~ "Överskott")
+}
+
+# klasser = 3 (som SCB:s rapport) eller 7 (alla bedömningsnivåer).
+skapa_karta_bedomning <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, kalla = KALLA_REGTOP,
+                                  klasser = 3) {
   d <- dplyr::filter(d, regionkod != "00") |>
-    dplyr::transmute(regionkod, region, balanstal_procent,
-                     klass = dplyr::if_else(har_bedomning, as.character(bedomning_2040), "Prognos saknas"))
+    dplyr::transmute(regionkod, region, balanstal_procent, bedomning = as.character(bedomning_2040),
+                     klass = dplyr::if_else(har_bedomning,
+                                            if (klasser == 3) regtop_klass3(bedomning_2040)
+                                            else as.character(bedomning_2040),
+                                            "Prognos saknas"))
   k <- dplyr::left_join(geo, d, by = "regionkod") |>
     dplyr::filter(!is.na(region)) |>
     dplyr::mutate(
-      klass = factor(dplyr::coalesce(klass, "Prognos saknas"), levels = c(REGTOP_BEDOMNINGAR, "Prognos saknas")),
+      klass = factor(dplyr::coalesce(klass, "Prognos saknas"),
+                     levels = c(if (klasser == 3) REGTOP_KLASS3 else REGTOP_BEDOMNINGAR, "Prognos saknas")),
       vald  = regionkod %in% vald_regionkod,
-      tooltip = paste0("<b>", region, "</b><br/>", klass,
+      tooltip = paste0("<b>", region, "</b><br/>", dplyr::coalesce(bedomning, "Prognos saknas"),
                        dplyr::if_else(is.na(balanstal_procent), "",
                                       paste0(" (balanstal ", .fmt_proc(balanstal_procent), ")"))))
   if (nrow(k) == 0) return(.girafe_std(.tom_plot("Ingen karta"), 4, 6))
-  farger <- c(BEDOMNING_FARGER, "Prognos saknas" = REGTOP_SAKNAS_FARG)
+  farger <- c(if (klasser == 3) KLASS3_FARGER else BEDOMNING_FARGER, "Prognos saknas" = REGTOP_SAKNAS_FARG)
   g <- ggplot2::ggplot(k) +
     ggiraph::geom_sf_interactive(ggplot2::aes(fill = klass, tooltip = tooltip, data_id = regionkod),
                                  colour = "white", linewidth = 0.2) +
@@ -360,4 +377,72 @@ skapa_diagram_vagar_andel <- function(d, rubrik = NULL, underrubrik = NULL, kall
                   caption = paste0("Källa: ", kalla)) +
     .rd_tema()
   .girafe_std(g, width_svg = 5, height_svg = 2.6, selection = FALSE)
+}
+
+# ---- Mätare (barometer) som i SCB:s rapport ------------------------------------------
+# d: serie (t.ex. "Dalarnas län", "Riket") och bedomning_2040. Halvcirkel med
+# överskott till vänster, balans överst och brist till höger; visaren pekar
+# på bedömningen (sju nivåer, så att t.ex. viss brist hamnar nära balans).
+.MATARE_VINKEL <- c(165, 145, 125, 90, 55, 35, 15)   # grader, stort överskott ... stor brist
+skapa_diagram_matare <- function(d, kalla = KALLA_REGTOP) {
+  baag <- function(fran, till, klass) {
+    v <- seq(fran, till, length.out = 40) * pi / 180
+    tibble::tibble(x = c(cos(v), rev(0.62 * cos(v))), y = c(sin(v), rev(0.62 * sin(v))), klass = klass)
+  }
+  sektorer <- dplyr::bind_rows(baag(112, 180, "Överskott"), baag(68, 112, "Balans"), baag(0, 68, "Brist"))
+  d <- d |> dplyr::mutate(
+    serie = factor(serie, levels = unique(serie)),
+    ordning = match(as.character(bedomning_2040), REGTOP_BEDOMNINGAR),
+    vinkel = .MATARE_VINKEL[8 - ordning] * pi / 180,
+    text = dplyr::coalesce(as.character(bedomning_2040), "Prognos saknas"))
+  sekt <- tidyr::expand_grid(serie = d$serie, sektorer)
+  visare <- d |> dplyr::filter(!is.na(ordning)) |>
+    dplyr::reframe(x = c(-0.06 * sin(vinkel), 0.95 * cos(vinkel), 0.06 * sin(vinkel)),
+                   y = c(0.06 * cos(vinkel), 0.95 * sin(vinkel), -0.06 * cos(vinkel)), .by = c(serie, text))
+  g <- ggplot2::ggplot() +
+    ggplot2::geom_polygon(data = sekt, ggplot2::aes(x, y, fill = klass, group = klass), colour = "white") +
+    ggplot2::geom_polygon(data = visare, ggplot2::aes(x, y, group = serie), fill = RD_TEXT) +
+    ggplot2::geom_text(data = d, ggplot2::aes(x = 0, y = -0.22, label = text), size = 3.2, fontface = "bold",
+                       colour = RD_TEXT) +
+    ggplot2::facet_wrap(~serie) +
+    ggplot2::scale_fill_manual(values = KLASS3_FARGER, breaks = rev(REGTOP_KLASS3), name = NULL) +
+    ggplot2::coord_equal(xlim = c(-1.05, 1.05), ylim = c(-0.35, 1.05)) +
+    ggplot2::theme_void() +
+    ggplot2::theme(legend.position = "bottom", legend.text = ggplot2::element_text(size = 8),
+                   strip.text = ggplot2::element_text(face = "bold", size = 10, margin = ggplot2::margin(b = 4)))
+  .girafe_std(g, width_svg = 5, height_svg = 2.3, selection = FALSE)
+}
+
+# ---- Kartöversikt: en liten karta per utbildningsgrupp (tre klasser) -------------------
+# geo: länens geometri, d: bedömningen för gruppernas alla län. Valt län
+# markeras med svart kant. Klick ger "utbildningsgrupp_kod|regionkod".
+skapa_karta_oversikt <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, kalla = KALLA_REGTOP,
+                                 ncol = 4) {
+  d <- dplyr::filter(d, regionkod != "00") |>
+    dplyr::transmute(utbildningsgrupp_kod, utbildningsgrupp, regionkod, region,
+                     bedomning = as.character(bedomning_2040),
+                     klass = dplyr::if_else(har_bedomning, regtop_klass3(bedomning_2040), "Prognos saknas"))
+  k <- dplyr::inner_join(geo, d, by = "regionkod", relationship = "one-to-many") |>
+    dplyr::mutate(
+      klass = factor(dplyr::coalesce(klass, "Prognos saknas"), levels = c(REGTOP_KLASS3, "Prognos saknas")),
+      grupp = factor(utbildningsgrupp, levels = sort(unique(utbildningsgrupp))),
+      vald  = regionkod %in% vald_regionkod,
+      tooltip = paste0("<b>", utbildningsgrupp, "</b><br/>", region, ": ", dplyr::coalesce(bedomning, "Prognos saknas")))
+  if (nrow(k) == 0) return(.girafe_std(.tom_plot("Ingen karta"), 6, 4))
+  farger <- c(KLASS3_FARGER, "Prognos saknas" = REGTOP_SAKNAS_FARG)
+  n <- dplyr::n_distinct(k$grupp)
+  g <- ggplot2::ggplot(k) +
+    ggiraph::geom_sf_interactive(ggplot2::aes(fill = klass, tooltip = tooltip,
+                                              data_id = paste(utbildningsgrupp_kod, regionkod, sep = "|")),
+                                 colour = "white", linewidth = 0.1) +
+    ggplot2::geom_sf(data = dplyr::filter(k, vald), fill = NA, colour = RD_TEXT, linewidth = 0.4) +
+    ggplot2::facet_wrap(~grupp, ncol = ncol, labeller = ggplot2::label_wrap_gen(28)) +
+    ggplot2::scale_fill_manual(values = farger, name = NULL, drop = FALSE) +
+    ggplot2::labs(title = rubrik, caption = paste0("Källa: ", kalla)) +
+    ggplot2::theme_void() +
+    ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", size = 12),
+                   plot.caption = ggplot2::element_text(size = 7, colour = RD_TEXT_MUTED, hjust = 0),
+                   strip.text = ggplot2::element_text(size = 8, face = "bold", margin = ggplot2::margin(b = 3)),
+                   legend.position = "top")
+  .girafe_std(g, width_svg = 9, height_svg = ceiling(n / ncol) * 3.2 + 1, selection = TRUE)
 }

@@ -257,3 +257,13 @@ html, body { overflow-x: hidden; }
 /* Prognos 2040: rubrik för vald utbildningsgrupp */
 .rd-rubrik-grupp { margin: 8px 0 12px; font-size: 1.35rem; }
 .rd-rubrik-grupp small { color: var(--rd-text-muted); font-size: 0.9rem; }
+
+/* Prognos 2040: tabelläget (bedömning per utbildningsgrupp) */
+.rd-tabell-bedomning { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.rd-tabell-bedomning th { text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--rd-primary); }
+.rd-tabell-bedomning td { padding: 4px 8px; border-bottom: 1px solid #fff; }
+.rd-tabell-bedomning .rd-bed-avsnitt td { font-weight: 700; color: var(--rd-primary); padding-top: 14px;
+  border-bottom: 1px solid #dee2e6; }
+.rd-tabell-bedomning .rd-bed-rad { cursor: pointer; }
+.rd-tabell-bedomning .rd-bed-rad:hover td:first-child { text-decoration: underline; }
+.rd-tabell-bedomning .rd-bed-cell { width: 28%; }
