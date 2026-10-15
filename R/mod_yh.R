@@ -665,7 +665,8 @@ mod_yh_server <- function(id) {
     })
 
     output$d_trend <- ggiraph::renderGirafe({
-      ind <- valt_indikator(); req(isTRUE(ind$klar))
+      # Bara Studerande - rita inte med en annan vys mått när vyn just bytts.
+      ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "dashboard")
       df <- trend_niva(data_bas())
       validate(need(nrow(df) > 0, "Inga data."))
       if (kon_uppdelat())
