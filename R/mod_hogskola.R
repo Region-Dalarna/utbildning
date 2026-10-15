@@ -51,6 +51,7 @@ hogskola_struktur <- list(
                            kalla = .KALLA_HOGSKOLA_EXAM,
                            beskrivning = paste(
                              "Antal utfärdade examina under året per ämnesområde (SUN 2020).",
+                             "Klicka på ett ämnesområde för att se vilka examina det består av.",
                              "En person kan ta flera examina."))
     )
   ),
@@ -226,7 +227,7 @@ mod_hogskola_server <- function(id) {
     dim_label <- reactive({
       if (identical(input$omrade, "studerande")) {
         if (ar_larosate()) "program" else "lärosäte"
-      } else "ämnesområde"
+      } else if (!is.null(omrade_drill())) "examen" else "ämnesområde"
     })
 
     filter_underrubrik <- function(med_ar = FALSE) {
@@ -253,14 +254,22 @@ mod_hogskola_server <- function(id) {
     # Könsuppdelat (förvalt) eller totalt - för Studerande och Examina.
     kon_uppdelat <- reactive({ !identical(input$kon_lage, "total") })
 
+    # Examina: klick på ett ämnesområde visar dess examina (omrade_drill),
+    # klick på en examen väljer den för trenden (program_vald).
     program_vald <- reactiveVal(NULL)
+    omrade_drill <- reactiveVal(NULL)
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      if (identical(isolate(input$omrade), "examina") && is.null(isolate(omrade_drill()))) {
+        if (length(sel) == 1) { omrade_drill(sel); program_vald(NULL) }
+        return()
+      }
       program_vald(if (length(sel) >= 1) sel else NULL)
     }, ignoreNULL = FALSE)
     observeEvent(list(input$omrade, input$perspektiv, input$larosate), {
-      program_vald(NULL)
+      program_vald(NULL); omrade_drill(NULL)
     }, ignoreInit = TRUE)
+    observeEvent(input$tillbaka, { omrade_drill(NULL); program_vald(NULL) })
 
     # ---- Studerande och examina: stapel- och totaldata ----------------------
     # stapel: en rad per (ar, program, kon) - programmen (lärosätesperspektivet)
@@ -272,6 +281,10 @@ mod_hogskola_server <- function(id) {
         d <- filtrera_perspektiv(hamta_hogskola_examen())
         et <- input$examenstyp
         if (!is.null(et) && et != "_alla_") d <- dplyr::filter(d, examenstyp == et)
+        # Nedborrat: examina i valt ämnesområde (examina går att summera, så
+        # områdets total = summan av dess examina).
+        if (!is.null(omrade_drill()))
+          d <- dplyr::filter(d, program == omrade_drill()) |> dplyr::mutate(program = examen_namn)
         return(d)
       }
       ak <- hamta_hogskola_aktivitet()
@@ -291,7 +304,7 @@ mod_hogskola_server <- function(id) {
     stapel_ar <- reactive({
       ind <- valt_indikator()
       d <- dplyr::filter(stapel_data(), ar == as.integer(req(input$ar)))
-      if (input$omrade == "examina" || nrow(d) == 0) return(d)
+      if ((input$omrade == "examina" && is.null(omrade_drill())) || nrow(d) == 0) return(d)
       storst <- d |>
         dplyr::group_by(program) |>
         dplyr::summarise(n = sum(.data[[ind$metrik]], na.rm = TRUE), .groups = "drop") |>
@@ -440,8 +453,12 @@ mod_hogskola_server <- function(id) {
       ind <- valt_indikator()
       if (!isTRUE(ind$klar)) return(div(class = "rd-info", "Den här vyn är inte inlagd än."))
       hint <- tags$p(class = "rd-hint rd-hint--bar",
-                     paste0("Klicka på en stapel i diagrammet för att se utvecklingen för ett specifikt ",
-                            dim_label(), "."))
+                     if (identical(input$omrade, "examina") && is.null(omrade_drill()))
+                       "Klicka på ett ämnesområde för att se vilka examina det består av."
+                     else paste0("Klicka på en stapel i diagrammet för att se utvecklingen för ett specifikt ",
+                                 dim_label(), "."))
+      tillbaka <- if (identical(input$omrade, "examina") && !is.null(omrade_drill()))
+        actionLink(ns("tillbaka"), "\u2190 Alla ämnesområden", class = "rd-tillbaka")
       notis <- if (identical(ind$metrik, "deltagare"))
         tags$p(class = "rd-hint",
                paste0("En student kan läsa ", if (ar_larosate()) "flera program" else "vid flera lärosäten",
@@ -455,7 +472,7 @@ mod_hogskola_server <- function(id) {
               size = "sm"))
       trend_id <- if (valt_vy() == "etablering") "d_etablering_trend" else "d_trend"
       fluidRow(
-        column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), kon_kontroll, hint, notis),
+        column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), kon_kontroll, hint, notis),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns(trend_id), height = "380px")))
       )
     })
@@ -481,7 +498,10 @@ mod_hogskola_server <- function(id) {
         tot <- sum(dplyr::filter(total_data(), ar == as.integer(input$ar))$deltagare, na.rm = TRUE)
         sub <- paste0(sub, " · Totalt ", scales::number(tot, big.mark = " "), " studenter")
       }
-      rub <- paste0(ind$amne, " efter ", dim_label())
+      rub <- paste0(ind$amne, " efter ", dim_label(),
+                    if (identical(input$omrade, "examina") && !is.null(omrade_drill()))
+                      paste0(" \u2013 ", omrade_drill()))
+      rub <- paste(strwrap(rub, width = 65), collapse = "\n")
       if (kon_uppdelat()) {
         skapa_diagram_bar_kon(.kon_bred(df, ind$metrik, "program"), "kv", "man",
                               ind$metrik_label, input$ar,
@@ -517,8 +537,10 @@ mod_hogskola_server <- function(id) {
       # Valt program/lärosäte: dess egen serie. Annars totalen.
       df <- if (is.null(prog)) total_data() else dplyr::filter(stapel_data(), program == prog)
       validate(need(nrow(df) > 0, "Inga data."))
-      rub <- if (is.null(prog)) paste0(ind$amne, " – utveckling över tid")
-             else paste0(ind$amne, " – ", prog)
+      fokus <- c(if (identical(input$omrade, "examina")) omrade_drill(), prog)
+      rub <- if (length(fokus) == 0) paste0(ind$amne, " – utveckling över tid")
+             else paste0(ind$amne, " – ", paste(fokus, collapse = " \u203a "))
+      rub <- paste(strwrap(rub, width = 55), collapse = "\n")
       sub <- filter_underrubrik()
       if (kon_uppdelat()) {
         skapa_diagram_trend_kon(.kon_bred(df, ind$metrik, "ar"), "kv", "man", ind$metrik_label,

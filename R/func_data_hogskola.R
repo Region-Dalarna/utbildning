@@ -91,7 +91,10 @@ hogskola_larosaten <- function() {
 }
 
 # ---- Examina ----------------------------------------------------------------
+# examen_namn = examensbenämningen (tmgrpnamn, t.ex. Sjuksköterskeexamen) -
+# visas när man klickar på ett ämnesområde.
 rensa_hogskola_examen <- function(rad) {
+  if (!"tmgrpnamn" %in% names(rad)) rad$tmgrpnamn <- NA_character_
   rad |>
     dplyr::rename(kommkod = regionkod, kommun = region) |>
     dplyr::mutate(
@@ -99,9 +102,11 @@ rensa_hogskola_examen <- function(rad) {
       kommkod    = as.character(kommkod),
       hskod      = as.character(hskod),
       program    = dplyr::coalesce(unname(.sun_bredast[substr(sun2020inr, 1, 1)]), "Okänd"),
-      examenstyp = dplyr::coalesce(unname(.examenstyp[substr(tmgrp, 1, 1)]), "Övrig examen")
+      examenstyp = dplyr::coalesce(unname(.examenstyp[substr(tmgrp, 1, 1)]), "Övrig examen"),
+      examen_namn = dplyr::coalesce(dplyr::na_if(trimws(tmgrpnamn), ""), tmgrp, "Okänd examen")
     ) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, hskod, hskod_namn, examenstyp, program, kon) |>
+    dplyr::group_by(ar, kommkod, kommun, geo_niva, hskod, hskod_namn, examenstyp, program,
+                    examen_namn, kon) |>
     dplyr::summarise(antal_examina = sum(antal_examina, na.rm = TRUE), .groups = "drop")
 }
 
