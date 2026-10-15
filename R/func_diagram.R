@@ -834,6 +834,17 @@ skapa_diagram_trend_jmf <- function(d, metrik_label, rubrik = NULL, underrubrik 
 # elever är okänt -> enkelt medel per år, ange i underrubrik).
 # Röjandekontroll när datan har ett underlag (kolumnen avslutade, YH);
 # gymnasiets genomströmning (Skolverket) saknar den och visas som den är.
+# Medel av andelar för flera kommuner: viktat med elevantal (kolumnen vikt,
+# se hamta_elevantal_vikt()) när vikt finns för alla, annars ovägt.
+# Saknade andelar (prickade av Skolverket) räknas inte med.
+.viktat_medel_andel <- function(andel, vikt = NULL) {
+  ok <- !is.na(andel)
+  if (!any(ok)) return(NA_real_)
+  if (is.null(vikt) || any(is.na(vikt[ok])) || sum(vikt[ok]) <= 0) return(mean(andel[ok]))
+  sum(andel[ok] * vikt[ok]) / sum(vikt[ok])
+}
+.GS_SAKNAS <- "uppgift saknas"
+
 skapa_diagram_genomstromning_trend <- function(df_dalarna, df_riket,
                                                program_sel = NULL,
                                                rubrik = NULL,
@@ -841,10 +852,11 @@ skapa_diagram_genomstromning_trend <- function(df_dalarna, df_riket,
                                                kalla = NULL,
                                                min_antal = MIN_ANTAL) {
   if (!"avslutade" %in% names(df_dalarna)) df_dalarna$avslutade <- NA_real_
-  # Dalarna: medel per år (datan är redan en andel per program/kommunkombination).
+  har_vikt <- "vikt" %in% names(df_dalarna)
+  # Dalarna: en andel per år - viktad över kommunerna om flera (se ovan).
   d_dal <- df_dalarna |>
     dplyr::group_by(ar) |>
-    dplyr::summarise(andel = mean(andel, na.rm = TRUE),
+    dplyr::summarise(andel = .viktat_medel_andel(andel, if (har_vikt) vikt),
                      underlag = sum(avslutade, na.rm = TRUE), .groups = "drop")
   dolda <- any(.dold(d_dal$underlag, min_antal))
   d_dal <- d_dal |>
@@ -891,19 +903,26 @@ skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
                                              kalla = NULL,
                                              min_antal = MIN_ANTAL) {
   if (!"avslutade" %in% names(df)) df$avslutade <- NA_real_
+  har_vikt <- "vikt" %in% names(df)
+  # Program utan andel (prickade av Skolverket) behålls med etiketten
+  # "uppgift saknas", så att de inte försvinner ur diagrammet.
   d <- df |>
     dplyr::group_by(program) |>
-    dplyr::summarise(andel = mean(andel, na.rm = TRUE),
+    dplyr::summarise(delvis = any(is.na(andel)) && !all(is.na(andel)),
+                     andel = .viktat_medel_andel(andel, if (har_vikt) vikt),
                      underlag = sum(avslutade, na.rm = TRUE), .groups = "drop") |>
-    dplyr::filter(!is.na(andel)) |>
     dplyr::mutate(
-      dold    = .dold(underlag, min_antal),
-      varde   = dplyr::if_else(dold, 0, andel),
+      saknas  = is.na(andel),
+      dold    = !saknas & .dold(underlag, min_antal),
+      varde   = dplyr::if_else(dold | saknas, 0, andel),
       program = forcats::fct_reorder(program, varde),
       tooltip = paste0("<b>", program, "</b><br/>",
                        .metrik_ar("Andel med examen", ar), ": ",
-                       dplyr::if_else(dold, .dold_text(min_antal),
-                                      paste0(scales::number(andel, accuracy = 0.1), " %"))),
+                       dplyr::case_when(
+                         saknas ~ paste0(.GS_SAKNAS, " (för få elever)"),
+                         dold   ~ .dold_text(min_antal),
+                         TRUE   ~ paste0(scales::number(andel, accuracy = 0.1), " %")),
+                       dplyr::if_else(delvis, "<br/>Uppgift saknas för någon av kommunerna.", "")),
       data_id = as.character(program))
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program)) +
@@ -918,6 +937,10 @@ skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
                   caption = .kalltext(kalla, any(d$dold), min_antal)) +
     .rd_tema()
   if (any(d$dold)) g <- g + .dold_etikett(dplyr::filter(d, dold), "program", min_antal)
+  if (any(d$saknas))
+    g <- g + ggplot2::geom_text(data = dplyr::filter(d, saknas), ggplot2::aes(x = 0, y = program),
+                                label = .GS_SAKNAS, hjust = -0.05, size = 2.8,
+                                colour = RD_TEXT_MUTED, fontface = "italic", inherit.aes = FALSE)
 
   .girafe_std(g, width_svg = 6.8, height_svg = 7.0, selection = TRUE)
 }
