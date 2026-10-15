@@ -551,7 +551,8 @@ mod_yh_server <- function(id) {
 
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      rub <- paste0(ind$amne, dim_text())
+      # Långa rubriker (utbildningsnamn) bryts så att de inte klipps.
+      rub <- paste(strwrap(paste0(ind$amne, dim_text()), width = 65), collapse = "\n")
 
       if (valt_vy() == "arbetsort") {
         d <- dplyr::filter(arbetsort_urval(), ar %in% examensar_valda())

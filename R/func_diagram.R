@@ -939,6 +939,7 @@ skapa_diagram_yh_genomstromning_bar <- function(d, ar = NULL, visa_ofullstandiga
                                                 riket_andel = NULL, rubrik = NULL,
                                                 underrubrik = NULL, kalla = NULL,
                                                 per_kon = FALSE, min_antal = MIN_ANTAL) {
+  ar_valt <- ar   # kolumnen ar nedan är bara en hjälpkolumn för summeringen
   d <- d |>
     dplyr::mutate(ar = 0L) |>
     yh_genomstromning_summera(grupp = c("program", if (per_kon) "kon")) |>
@@ -955,7 +956,7 @@ skapa_diagram_yh_genomstromning_bar <- function(d, ar = NULL, visa_ofullstandiga
       kon_lab = if (per_kon) factor(unname(.YH_KON_ETIKETT[kon]), levels = names(KON_FARGER)) else NA,
       program = forcats::fct_reorder(program, varde, .fun = sum),
       tooltip = paste0("<b>", program, "</b><br/>", if (per_kon) paste0(kon_lab, " \u00b7 ") else "",
-                       .metrik_ar("Andel med examen", ar), ": ",
+                       .metrik_ar("Andel med examen", ar_valt), ": ",
                        dplyr::case_when(
                          gomd ~ "visas inte",
                          dold ~ .dold_text(min_antal),
