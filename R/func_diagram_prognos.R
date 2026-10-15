@@ -446,3 +446,37 @@ skapa_karta_oversikt <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, k
                    legend.position = "top")
   .girafe_std(g, width_svg = 9, height_svg = ceiling(n / ncol) * 3.2 + 1, selection = TRUE)
 }
+
+# ---- Rörlighet: inflöde, utflöde och netto per period --------------------------------------
+# d: regtop_rorlighet() (flode_text, period, typ, variabel in/ut/netto, varde).
+# In uppåt, ut nedåt, netto som romb. En panel per flöde (egna skalor).
+skapa_diagram_rorlighet <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data om flytt och pendling"), 7, 3.6))
+  d <- d |> dplyr::mutate(
+    flode_text = factor(flode_text, levels = intersect(REGTOP_FLODE_TEXT, unique(flode_text))),
+    enhet_text = dplyr::if_else(flode == "pendling", "", " per år"),
+    tooltip = paste0("<b>", flode_text, " ", period, if_else_prognos(typ), "</b><br/>",
+                     c(`in` = "In", ut = "Ut", netto = "Netto")[variabel], ": ",
+                     dplyr::if_else(varde > 0 & variabel == "netto", "+", ""), .fmt_antal(varde), enhet_text))
+  staplar <- dplyr::filter(d, variabel %in% c("in", "ut"))
+  netto <- dplyr::filter(d, variabel == "netto")
+  g <- ggplot2::ggplot(mapping = ggplot2::aes(x = period)) +
+    ggplot2::geom_hline(yintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggiraph::geom_col_interactive(data = staplar,
+                                  ggplot2::aes(y = varde, fill = variabel, tooltip = tooltip,
+                                               data_id = paste(flode, period, variabel)), width = 0.6) +
+    ggiraph::geom_point_interactive(data = netto,
+                                    ggplot2::aes(y = varde, tooltip = tooltip, data_id = paste(flode, period, "netto")),
+                                    shape = 23, size = 3, fill = RD_TEXT, colour = "white") +
+    ggplot2::facet_wrap(~flode_text, scales = "free", nrow = 1) +
+    ggplot2::scale_fill_manual(values = c(`in` = "#459079", ut = "#d9653b"),
+                               labels = c(`in` = "Inflöde", ut = "Utflöde"), name = NULL) +
+    ggplot2::scale_y_continuous(labels = .fmt_antal) +
+    ggplot2::labs(x = NULL, y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla, "\nRomb = netto. Flytt och migration: per år under perioden; ",
+                                   "pendling: antal personer 2023 och 2040 (prognos).")) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top", axis.text.x = ggplot2::element_text(size = 7),
+                   strip.text = ggplot2::element_text(face = "bold"))
+  .girafe_std(g, width_svg = 8, height_svg = 3.6, selection = FALSE)
+}

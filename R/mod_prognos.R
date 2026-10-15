@@ -22,6 +22,7 @@ prognos_struktur <- list(
   bedomning       = list(label = "Bedömning 2040"),
   kartor          = list(label = "Kartöversikt"),
   vagar           = list(label = "Vägar in i yrket"),
+  rorlighet       = list(label = "Flytt och pendling"),
   gymnasiet       = list(label = "Gymnasiet"),
   eftergymnasialt = list(label = "Eftergymnasialt")
 )
@@ -130,6 +131,7 @@ mod_prognos_server <- function(id) {
       if (omrade() == "vagar") return(vy_vagar())
       if (omrade() %in% c("gymnasiet", "eftergymnasialt")) return(vy_period())
       if (omrade() == "kartor") return(vy_kartor())
+      if (omrade() == "rorlighet") return(vy_rorlighet())
       if (is.null(grupp_vald()) && identical(input$visning, "tabell"))
         return(tagList(uiOutput(ns("tabell")),
                        tags$p(class = "rd-hint", "Klicka på en rad för att se vad som ligger bakom bedömningen.")))
@@ -175,6 +177,9 @@ mod_prognos_server <- function(id) {
                         tags$p(class = "rd-hint",
                                "Tre klasser som i SCB:s rapport (viss brist, brist och stor brist = brist). ",
                                "Klicka på ett län för att byta län.")))
+        ),
+        fluidRow(
+          column(12, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_rorlighet"), height = "380px")))
         ),
         fluidRow(
           column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_kon"), height = "330px")))
@@ -340,6 +345,75 @@ mod_prognos_server <- function(id) {
         shinyWidgets::updatePickerInput(session, "region", selected = sel)
     })
 
+    # ---- Rörlighet ---------------------------------------------------------------------
+    # I fördjupningen: inflöde, utflöde och netto för vald grupp.
+    output$d_rorlighet <- ggiraph::renderGirafe({
+      req(grupp_vald())
+      d <- regtop_rorlighet(region(), grupp_vald())
+      skapa_diagram_rorlighet(d, rubrik = "Flytt, migration och pendling",
+                              underrubrik = paste0(region_namn(), if (region() == "00")
+                                " \u00b7 för riket finns bara migration" else ""))
+    })
+
+    # Statistikområdet Flytt och pendling: nettot per utbildningsgrupp för
+    # valt flöde och period. Klick öppnar gruppens fördjupning.
+    rorlighet_valt <- reactive(if (is.null(input$rorlighet_flode)) "inrikes_flytt" else input$rorlighet_flode)
+    rorlighet_netto <- reactive({
+      hamta_regtop("rorlighet") |>
+        dplyr::filter(regionkod == region(), flode == rorlighet_valt(), variabel == "netto") |>
+        .regtop_perioder() |> regtop_arligt() |>
+        dplyr::mutate(period = dplyr::if_else(ar_fran == ar_till, as.character(ar_fran),
+                                              paste0(ar_fran, "\u2013", ar_till)))
+    })
+    rorlighet_perioder <- reactive(unique(rorlighet_netto()$period[order(rorlighet_netto()$ar_fran)]))
+    output$rorlighet_period_ui <- renderUI({
+      req(length(rorlighet_perioder()) > 0)
+      tidigare <- isolate(input$rorlighet_period)
+      selectInput(ns("rorlighet_period"), "Period", choices = rorlighet_perioder(),
+                  selected = if (!is.null(tidigare) && tidigare %in% rorlighet_perioder()) tidigare
+                             else utils::tail(rorlighet_perioder(), 1))
+    })
+    vy_rorlighet <- function() {
+      n <- dplyr::n_distinct(rorlighet_netto()$utbildningsgrupp_kod)
+      tagList(
+        ggiraph::girafeOutput(ns("d_rorlighet_netto"), height = paste0(max(400, n * 20 + 180), "px")),
+        tags$p(class = "rd-hint",
+               "Nettot är inflöde minus utflöde. Positivt netto ökar länets tillgång på personer med ",
+               "utbildningen. Klicka på en grupp för att se hela bilden."))
+    }
+    output$d_rorlighet_netto <- ggiraph::renderGirafe({
+      req(omrade() == "rorlighet")
+      p <- if (is.null(input$rorlighet_period) || !input$rorlighet_period %in% rorlighet_perioder())
+        utils::tail(rorlighet_perioder(), 1) else input$rorlighet_period
+      d <- dplyr::filter(rorlighet_netto(), period %in% p)
+      validate(need(nrow(d) > 0, if (region() == "00")
+        "För riket finns bara migration - välj Migration eller ett län." else "Inga data för valt urval."))
+      d <- d |> dplyr::mutate(
+        grupp = forcats::fct_reorder(utbildningsgrupp, varde),
+        riktning = dplyr::if_else(varde >= 0, "okning", "minskning"),
+        tooltip = paste0("<b>", utbildningsgrupp, "</b><br/>Netto ", p, if_else_prognos(typ), ": ",
+                         dplyr::if_else(varde > 0, "+", ""), .fmt_antal(varde),
+                         if (rorlighet_valt() == "pendling") "" else " per år"))
+      g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = grupp, fill = riktning)) +
+        ggplot2::geom_vline(xintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
+        ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = utbildningsgrupp_kod), width = 0.75) +
+        ggplot2::scale_fill_manual(values = c(okning = "#459079", minskning = "#d9653b"), guide = "none") +
+        ggplot2::scale_x_continuous(labels = .fmt_antal) +
+        ggplot2::labs(x = if (rorlighet_valt() == "pendling") "Nettopendling, antal personer" else "Netto per år",
+                      y = NULL,
+                      title = paste0(REGTOP_FLODE_TEXT[[rorlighet_valt()]], " \u2013 ", region_namn()),
+                      subtitle = paste0("Netto per utbildningsgrupp, ", p),
+                      caption = paste0("Källa: ", KALLA_REGTOP)) +
+        .rd_tema()
+      .girafe_std(g, width_svg = 7.5, height_svg = max(4, nrow(d) * 0.22 + 1.8), selection = TRUE)
+    })
+    observeEvent(input$d_rorlighet_netto_selected, {
+      sel <- input$d_rorlighet_netto_selected
+      if (length(sel) != 1) return()
+      grupp_vald(sel)
+      shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = "bedomning")
+    })
+
     # ---- Kartöversikt -------------------------------------------------------------
     # Alla utbildningsgrupper inom valt område som små kartor (tre klasser).
     # Klick på en karta öppnar gruppens fördjupning i Bedömning 2040.
@@ -432,7 +506,24 @@ mod_prognos_server <- function(id) {
     eg_ind <- reactive(REGTOP_EFTERGYMN[[if (is.null(input$eg_matt)) "yh_antagna" else input$eg_matt]])
     # Nybörjare på högskolans yrkesexamensprogram finns bara för riket.
     period_region <- reactive(if (omrade() == "eftergymnasialt" && isTRUE(eg_ind()$bara_riket)) "00" else region())
-    period_region_namn <- reactive(names(regtop_regioner())[match(period_region(), regtop_regioner())])
+    period_region_namn <- reactive({
+      if (omrade() == "eftergymnasialt" && isTRUE(eg_ind()$larosate)) return(valt_larosate())
+      names(regtop_regioner())[match(period_region(), regtop_regioner())]
+    })
+    # Lärosäten i nyborjare_larosate; Högskolan Dalarna förvald.
+    larosaten <- reactive(sort(unique(hamta_regtop("nyborjare_larosate")$larosate)))
+    valt_larosate <- reactive({
+      l <- input$larosate
+      if (!is.null(l) && l %in% larosaten()) return(l)
+      hd <- grep("Dalarna", larosaten(), value = TRUE)
+      if (length(hd) > 0) hd[1] else larosaten()[1]
+    })
+    output$larosate_ui <- renderUI({
+      req(omrade() == "eftergymnasialt", isTRUE(eg_ind()$larosate))
+      shinyWidgets::pickerInput(ns("larosate"), "Lärosäte", choices = larosaten(),
+                                selected = isolate(valt_larosate()),
+                                options = shinyWidgets::pickerOptions(liveSearch = TRUE))
+    })
 
     # Rådata för valt mått och område, med kolumnen kategori.
     period_ra <- reactive({
@@ -443,6 +534,11 @@ mod_prognos_server <- function(id) {
         return(dplyr::mutate(d, kategori = program))
       }
       ind <- eg_ind()
+      if (isTRUE(ind$larosate)) {
+        d <- hamta_regtop("nyborjare_larosate")
+        d <- dplyr::filter(d, larosate == valt_larosate())
+        return(dplyr::mutate(d, kategori = dplyr::coalesce(examen, utbildningsgrupp)))
+      }
       d <- dplyr::filter(hamta_regtop("eftergymnasial"), regionkod == period_region(),
                          utbildningsform == ind$utbildningsform, matt == ind$matt)
       dplyr::mutate(d, kategori = if (ind$matt == "nyborjare") dplyr::coalesce(examen, utbildningsgrupp)
@@ -464,6 +560,12 @@ mod_prognos_server <- function(id) {
     })
 
     output$omrade_ui <- renderUI({
+      if (omrade() == "rorlighet")
+        return(tagList(
+          shinyWidgets::radioGroupButtons(ns("rorlighet_flode"), "Flöde", direction = "vertical",
+                                          choices = stats::setNames(names(REGTOP_FLODE_TEXT), REGTOP_FLODE_TEXT),
+                                          selected = isolate(rorlighet_valt())),
+          uiOutput(ns("rorlighet_period_ui"))))
       if (omrade() == "vagar")
         return(selectInput(ns("vagar_grupp"), "Utbildningsgrupp", choices = vagar_grupper(),
                            selected = if (!is.null(grupp_vald()) && grupp_vald() %in% vagar_grupper())
@@ -483,6 +585,7 @@ mod_prognos_server <- function(id) {
             ns("eg_matt"), "Mått", direction = "vertical",
             choices = stats::setNames(names(REGTOP_EFTERGYMN), vapply(REGTOP_EFTERGYMN, `[[`, "", "label")),
             selected = isolate(if (is.null(input$eg_matt)) "yh_antagna" else input$eg_matt)),
+          uiOutput(ns("larosate_ui")),
           uiOutput(ns("period_ui"))))
       NULL
     })
@@ -517,11 +620,13 @@ mod_prognos_server <- function(id) {
         dplyr::summarise(hist = sum(varde[typ == "historik" & period %in% senaste_hist()]),
                          prog = sum(varde[typ == "prognos" & period %in% vald_period()]), .groups = "drop") |>
         dplyr::mutate(hist = dplyr::na_if(hist, 0), prog = dplyr::na_if(prog, 0))
+      har_prognos <- length(vald_period()) == 1
       skapa_diagram_prognos_jmf(
         jmf, hist_label = paste0(senaste_hist(), " (historik)"),
-        prog_label = paste0(vald_period(), " (prognos, per år)"),
-        rubrik = paste0(matt_label(), " – ", period_region_namn()),
-        underrubrik = paste0("Senaste år jämfört med prognosen ", vald_period()))
+        prog_label = if (har_prognos) paste0(vald_period(), " (prognos, per år)") else "Prognos",
+        rubrik = paste0(matt_label(), " \u2013 ", period_region_namn()),
+        underrubrik = if (har_prognos) paste0("Senaste år jämfört med prognosen ", vald_period())
+                      else paste0("Senaste år (", senaste_hist(), "), ingen prognos"))
     })
     output$d_period_tid <- ggiraph::renderGirafe({
       req(omrade() %in% c("gymnasiet", "eftergymnasialt"))

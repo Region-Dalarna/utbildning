@@ -170,5 +170,25 @@ REGTOP_EFTERGYMN <- list(
   hs_generell    = list(label = "Högskola, generell examen", utbildningsform = "hogskola_generell_examen",
                         matt = "examinerade"),
   hs_nyborjare   = list(label = "Högskola, nybörjare (riket)", utbildningsform = "hogskola_yrkesexamen",
-                        matt = "nyborjare", bara_riket = TRUE)
+                        matt = "nyborjare", bara_riket = TRUE),
+  # nyborjare_larosate: nybörjare på yrkesexamensprogram per lärosäte (ingen region).
+  hs_larosate    = list(label = "Högskola, nybörjare per lärosäte", tabell = "nyborjare_larosate",
+                        matt = "nyborjare", larosate = TRUE)
 )
+
+# ---- Rörlighet (rorlighet) -------------------------------------------------------------
+# flode: inrikes_flytt (bara län), migration (län och riket), pendling (bara
+# län, 2023 och 2040, antal). variabel in/ut/netto, utflöden negativa.
+REGTOP_FLODE_TEXT <- c(inrikes_flytt = "Inrikes flytt", migration = "Migration", pendling = "Arbetspendling")
+
+# Rörligheten för en region och grupp: perioder som årligt genomsnitt,
+# pendlingen som antal personer det året.
+regtop_rorlighet <- function(regionkod, kod) {
+  hamta_regtop("rorlighet") |>
+    dplyr::filter(.data$regionkod == .env$regionkod, utbildningsgrupp_kod == kod) |>
+    .regtop_perioder() |>
+    regtop_arligt() |>
+    dplyr::mutate(flode_text = dplyr::coalesce(unname(REGTOP_FLODE_TEXT[flode]), flode),
+                  period = dplyr::if_else(ar_fran == ar_till, as.character(ar_fran),
+                                          paste0(ar_fran, "–", ar_till)))
+}
