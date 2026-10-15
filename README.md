@@ -49,6 +49,13 @@ Tabellerna hämtas en gång per R-process och cachas. Komvux och Folkhögskola h
 en kolumn `granularitet`: deltagare (unika individer) får inte summeras över
 finare nivåer, så de läses från den nivå som motsvarar diagrammet.
 
+YH-tabellerna har två nivåer i kolumnen `granularitet` (`Omrade` och
+`Utbildning`). Appen läser alltid en nivå i taget (`yh_niva()`). Startårgångar
+i genomströmningen där mer än `YH_PAGAENDE_VARNING` % pågår markeras, och över
+`YH_PAGAENDE_DOLJ` % döljs de som standard. Etableringen räknas bara till och med
+uppföljningsår `YH_SISTA_UPPF_AR`, och bytet av definition vid
+`YH_DEFINITIONSBYTE` markeras.
+
 I Antagning tolkas inriktning och introduktionsprogrammets varianter ur
 `anskod` (`tolka_anskod()` i `R/func_data.R`). Inriktningskoder som saknar namn
 i fritexten listas med `antagning_inriktningar_utan_namn()` och läggs in i

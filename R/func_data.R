@@ -549,9 +549,10 @@ skriv_gymnasie_excel <- function(df, file, blad = "Gymnasiet", min_antal = MIN_A
 # minst så många etablerade har uppgift om inkomst.
 
 summera_etablering_nedladdning <- function(df) {
+  # granularitet/utbildningsnamn (YH) hålls isär - nivåerna får aldrig summeras ihop.
   grupp <- intersect(c("exam_ar_interval", "uppf_ar_interval", "antal_ar", "geo_niva",
-                       "kommkod", "kommun", "samverkansomrade", "program", "inriktning",
-                       "organisationstyp"), names(df))
+                       "kommkod", "kommun", "samverkansomrade", "granularitet", "program",
+                       "utbildningsnamn", "inriktning", "organisationstyp"), names(df))
   status <- c("etabl", "syss", "stud", "arblos", "ovriga")
 
   # Inkomst som summa + antal etablerade med inkomst. YH/Högskola har dem

@@ -393,17 +393,27 @@ mod_gymnasiet_avgangna_server <- function(id) {
     trend_rader <- function(koder, med_grupp = FALSE) {
       fokus_inr  <- program_vald()
       fokus_prog <- program_drill()
-      if (prog_vy() && (!is.null(fokus_prog) || har_detalj())) {
+      beh   <- valt_indikator()$vy == "behorighet"
+      med_g <- med_grupp && !is.null(grupp())
+      hm    <- huvudman() != "_alla_"
+      # Detaljgranulariteten bara när urvalet kräver den: valt program, eller
+      # en kombination som saknar egen granularitet. Totaler (unika elever)
+      # läses annars från sin egen granularitet - detaljraderna kan i enstaka
+      # fall summera till en elev för mycket (två rader samma år).
+      kombination <- (hm && (med_g || vy() == "betygstyp")) || (beh && (med_g || hm))
+      if (!is.null(fokus_prog) || (har_detalj() && kombination)) {
         d <- if (har_detalj()) {
           dd <- gran(AVGANGNA_DETALJ)
-          if (huvudman() != "_alla_") dd <- dplyr::filter(dd, .data$huvudman == .env$huvudman())
+          if (hm) dd <- dplyr::filter(dd, .data$huvudman == .env$huvudman())
           dd
         } else gran("TypStudievag")
         if (!is.null(fokus_prog)) d <- dplyr::filter(d, program_namn == fokus_prog)
         if (!is.null(fokus_inr))  d <- dplyr::filter(d, inriktning_kort == fokus_inr)
-      } else if (med_grupp && !is.null(grupp())) {
+      } else if (beh) {
+        d <- gran("TypBeh")
+      } else if (med_g) {
         d <- gran(grupp()$granularitet)
-      } else if (huvudman() != "_alla_") {
+      } else if (hm) {
         d <- dplyr::filter(gran("TypHuvudman"), .data$huvudman == .env$huvudman())
       } else {
         d <- gran(if (vy() == "betygstyp") "TypBetygstyp" else "Typ")

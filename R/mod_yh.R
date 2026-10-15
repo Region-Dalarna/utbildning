@@ -8,10 +8,13 @@
 #    (geo_niva == "lan" i datan är redan en färdig Dalarna-totalrad,
 #    ingen egen viktning behövs, se func_data_yh.R).
 #  - Ingen driftsform (finns inte i YH-datan).
-#  - Ingen program/inriktning-nivå - "program" = UtbildningsOmrade_Utb,
-#    "namn" == "program" rakt av (ingen underindelning).
-#  - Etablering har bara 1/3/5 år efter examen (inte 7, se
-#    uttag_yh_uppf_raks.R som bara kör de tre kohorterna).
+#  - Klick på ett utbildningsområde visar dess utbildningar (granularitet
+#    "Utbildning"), klick på en utbildning visar den över tid. Områdets egna
+#    siffror kommer alltid från "Omrade"-raderna (se func_data_yh.R).
+#  - Genomströmning: ej färdiga startårgångar markeras, ofullständiga
+#    (mer än YH_PAGAENDE_DOLJ % pågår) döljs om användaren inte väljer dem.
+#  - Etablering: 1/3/5 år efter examen, ett eller flera examensår (andelar
+#    ur summorna). Definitionsbytet vid uppföljningsår 2020 markeras.
 #
 #  Diagramfunktionerna återanvänds OFÖRÄNDRADE från func_diagram.R -
 #  se func_data_yh.R för hur kolumnerna döps om för att passa kontraktet.
@@ -19,6 +22,7 @@
 
 .KALLA_YH <- kalla_rud("YH – studerande")
 .KALLA_YH_ETABL <- kalla_rud("YH – studerande och RAKS/BAS")
+.YH_ANTAL_UTBILDNINGAR <- 25
 
 yh_struktur <- list(
   studerande = list(
@@ -50,10 +54,10 @@ yh_struktur <- list(
         metrik = "andel", metrik_label = "Andel med examen (%)",
         kalla = .KALLA_YH,
         beskrivning = paste(
-          "Andel av dem som PÅBÖRJADE en YH-utbildning ett visst år och vars",
-          "utbildning sedan är avslutad (oavsett hur lång tid det tog) som",
-          "tagit examen. De vars utbildning ännu inte är avslutad räknas inte",
-          "med i nämnaren.")
+          "Andel med examen bland dem som påbörjade en YH-utbildning ett visst år",
+          "och vars utbildning är avslutad. De som fortfarande studerar räknas inte",
+          "med, så för de senaste startåren - där få hunnit bli klara - visas hur",
+          "stor del som fortfarande pågår.")
       )
     )
   ),
@@ -112,6 +116,7 @@ mod_yh_ui <- function(id) {
           options = shinyWidgets::pickerOptions(liveSearch = TRUE)
         ),
         uiOutput(ns("ar_ui")),
+        uiOutput(ns("ofullstandiga_ui")),
 
         tags$hr(),
         div(
@@ -193,38 +198,81 @@ mod_yh_server <- function(id) {
       txt
     }
 
-    # ---- Etablering: uppföljningsår (1/3/5) --------------------------------
+    # Valt område (kommun eller Hela Dalarna), alla nivåer.
+    geo_filter <- function(d) {
+      gv <- input$geo_val
+      if (is.null(gv) || gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
+      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
+    }
+
+    # ---- Nedborrning: område -> utbildningar -----------------------------------
+    # omrade_drill = utbildningsområdet man klickat på (staplarna visar då dess
+    # utbildningar), utb_vald = vald utbildning (för trenden).
+    omrade_drill <- reactiveVal(NULL)
+    utb_vald     <- reactiveVal(NULL)
+    observeEvent(input$d_bar_selected, {
+      sel <- input$d_bar_selected
+      if (is.null(isolate(omrade_drill()))) {
+        if (length(sel) == 1) { omrade_drill(sel); utb_vald(NULL) }
+      } else {
+        utb_vald(if (length(sel) == 1) sel else NULL)
+      }
+    }, ignoreNULL = FALSE)
+    observeEvent(input$tillbaka, { omrade_drill(NULL); utb_vald(NULL) })
+    observeEvent(input$omrade, { omrade_drill(NULL); utb_vald(NULL) }, ignoreInit = TRUE)
+
+    # Staplarnas nivå: områdena, eller utbildningarna i valt område.
+    niva <- function(d) yh_niva(d, omrade_drill())
+    # Trendens rader: hela urvalet, valt område (Omrade-raderna) eller vald
+    # utbildning - aldrig en summa av utbildningar.
+    trend_niva <- function(d) {
+      if (!is.null(utb_vald())) dplyr::filter(niva(d), program == utb_vald())
+      else if (!is.null(omrade_drill())) dplyr::filter(yh_niva(d), program == omrade_drill())
+      else yh_niva(d)
+    }
+    fokus_text <- function() {
+      f <- c(omrade_drill(), utb_vald())
+      if (length(f) == 0) NULL else paste(f, collapse = " \u203a ")
+    }
+    dim_text <- function() {
+      if (is.null(omrade_drill())) " efter utbildningsområde"
+      else paste0(" efter utbildning \u2013 ", omrade_drill())
+    }
+    # Högst .YH_ANTAL_UTBILDNINGAR utbildningar i stapeldiagrammet.
+    storsta <- function(d, matt) {
+      if (is.null(omrade_drill())) return(d)
+      top <- d |> dplyr::group_by(program) |>
+        dplyr::summarise(n = sum(.data[[matt]], na.rm = TRUE), .groups = "drop") |>
+        dplyr::slice_max(n, n = .YH_ANTAL_UTBILDNINGAR, with_ties = FALSE) |>
+        dplyr::pull(program)
+      dplyr::filter(d, program %in% top)
+    }
+
+    # ---- Etablering: uppföljningstid och examensår ------------------------------
     antal_ar_vald <- reactiveVal("1")
     lapply(c("1", "3", "5", "alla"), function(v) {
       observeEvent(input[[paste0("arbtn_", v)]], { antal_ar_vald(v) }, ignoreInit = TRUE)
     })
+    # Examensår som finns för vald uppföljningstid (Alla år: de som finns för
+    # alla tre). Uppföljningsår efter YH_SISTA_UPPF_AR är redan bortfiltrerade.
+    examensar_tillg <- reactive({
+      d  <- dplyr::filter(hamta_yh_etablering(), geo_niva %in% c("lan", "kommun"))
+      av <- antal_ar_vald()
+      per <- split(d$ar, d$antal_ar)
+      ar <- if (identical(av, "alla")) Reduce(intersect, per) else per[[av]]
+      sort(unique(ar), decreasing = TRUE)
+    })
+    examensar_valda <- reactive({
+      v <- intersect(as.integer(input$examensar), examensar_tillg())
+      sort(if (length(v) == 0) utils::head(examensar_tillg(), 3) else v)
+    })
 
     output$prog_niva_ui <- renderUI({
       req(valt_vy() == "etablering")
-      d_et   <- hamta_yh_etablering()
-      alla   <- c("1", "3", "5")
-      ar_val <- tryCatch(as.integer(input$ar), error = function(e) NA_integer_)
-      if (is.na(ar_val))
-        ar_val <- max(d_et$ar[d_et$geo_niva %in% c("lan", "kommun")], na.rm = TRUE)
-
-      har_data <- function(av) {
-        r <- d_et[d_et$antal_ar == as.integer(av) &
-                    d_et$geo_niva %in% c("lan", "kommun") &
-                    d_et$ar == ar_val, , drop = FALSE]
-        nrow(r) > 0 && any(!is.na(r$syss) | !is.na(r$stud) | !is.na(r$arblos) | !is.na(r$etabl))
-      }
-      tillg <- alla[vapply(alla, har_data, logical(1))]
-      if (length(tillg) == 0) tillg <- alla
-
       vald <- antal_ar_vald()
-      if (vald != "alla" && !vald %in% tillg) { vald <- tillg[1]; antal_ar_vald(vald) }
-
       gor_knapp <- function(v, etikett) {
-        aktiv <- identical(v, vald)
-        btn <- actionButton(
-          ns(paste0("arbtn_", v)), etikett,
-          class = paste("btn btn-sm rd-arbtn", if (aktiv) "rd-arbtn-aktiv" else ""))
-        if (v != "alla" && !v %in% tillg) shinyjs::disabled(btn) else btn
+        actionButton(ns(paste0("arbtn_", v)), etikett,
+                     class = paste("btn btn-sm rd-arbtn", if (identical(v, vald)) "rd-arbtn-aktiv" else ""))
       }
       tagList(
         div(
@@ -239,8 +287,8 @@ mod_yh_server <- function(id) {
     })
 
     output$program_filter_ui <- renderUI({
-      req(valt_vy() == "etablering")
-      d_et <- hamta_yh_etablering()
+      req(valt_vy() == "etablering", is.null(omrade_drill()))
+      d_et <- yh_niva(hamta_yh_etablering())
       prg <- sort(unique(stats::na.omit(d_et$program[d_et$geo_niva %in% c("kommun", "lan")])))
       tidigare <- isolate(input$program_filter)
       vald <- if (!is.null(tidigare) && length(tidigare) > 0 && all(tidigare %in% prg)) tidigare else prg
@@ -254,96 +302,89 @@ mod_yh_server <- function(id) {
       )
     })
 
-    program_vald <- reactiveVal(NULL)
-    observeEvent(input$d_bar_selected, {
-      sel <- input$d_bar_selected
-      program_vald(if (length(sel) >= 1) sel else NULL)
-    }, ignoreNULL = FALSE)
-    observeEvent(input$omrade, { program_vald(NULL) }, ignoreInit = TRUE)
+    # ---- Genomströmning: ofullständiga årgångar ---------------------------------
+    visa_ofullstandiga <- reactive(isTRUE(input$visa_ofullstandiga))
+    output$ofullstandiga_ui <- renderUI({
+      req(valt_vy() == "genomstromning")
+      checkboxInput(ns("visa_ofullstandiga"), "Visa ofullständiga årgångar",
+                    value = isolate(visa_ofullstandiga()))
+    })
+    # Urvalets årgångar (område/utbildning i vald kommun) med status.
+    gs_urval_ar <- reactive({
+      req(valt_vy() == "genomstromning")
+      yh_genomstromning_summera(trend_niva(geo_filter(hamta_yh_genomstromning())))
+    })
 
     output$ar_ui <- renderUI({
-      d  <- aktuell_data()
       vy <- tryCatch(valt_vy(), error = function(e) "dashboard")
-      tidigare_ar <- isolate(input$ar)
-      behall <- function(giltiga, standard) {
-        if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(giltiga)) tidigare_ar else standard
-      }
-
+      tidigare <- isolate(input$ar)
       if (vy == "etablering") {
-        ep <- d |>
-          dplyr::filter(geo_niva %in% c("lan", "kommun")) |>
-          dplyr::distinct(ar, exam_ar_interval) |>
-          dplyr::arrange(dplyr::desc(ar))
-        etiketter <- gsub("-", "\u2013", ep$exam_ar_interval, fixed = TRUE)
-        choices <- stats::setNames(ep$ar, etiketter)
-        selectInput(ns("ar"), "Examensperiod", choices = choices,
-                    selected = behall(ep$ar, ep$ar[1]))
-      } else {
-        ar <- sort(unique(d$ar), decreasing = TRUE)
-        selectInput(ns("ar"), "År", choices = ar, selected = behall(ar, max(ar)))
+        tillg <- examensar_tillg()
+        valda <- isolate(input$examensar)
+        valda <- if (!is.null(valda) && all(as.integer(valda) %in% tillg)) valda else utils::head(tillg, 3)
+        return(shinyWidgets::pickerInput(
+          ns("examensar"), "Examensår", choices = tillg, selected = valda, multiple = TRUE,
+          options = shinyWidgets::pickerOptions(selectedTextFormat = "count > 4",
+                                                countSelectedText = "{0} examensår valda")))
       }
+      if (vy == "genomstromning") {
+        s <- gs_urval_ar()
+        ar <- sort(s$ar[visa_ofullstandiga() | s$status %in% c("komplett", "varning")], decreasing = TRUE)
+        req(length(ar) > 0)
+        return(selectInput(ns("ar"), "Startår", choices = ar,
+                           selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare else max(ar)))
+      }
+      ar <- sort(unique(aktuell_data()$ar), decreasing = TRUE)
+      selectInput(ns("ar"), "År", choices = ar,
+                  selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare else max(ar))
     })
 
-    data_bas <- reactive({
-      d  <- aktuell_data()
-      gv <- req(input$geo_val)
-      if (gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
-      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
-    })
+    data_bas <- reactive(geo_filter(aktuell_data()))
     data_ar <- reactive({
       req(input$ar)
-      dplyr::filter(data_bas(), ar == as.integer(input$ar))
+      dplyr::filter(niva(data_bas()), ar == as.integer(input$ar))
     })
 
-    # ---- Genomströmning -----------------------------------------------------
-    yh_genomstromning_dalarna <- reactive({
-      req(valt_vy() == "genomstromning")
-      d  <- hamta_yh_genomstromning()
-      gv <- input$geo_val
-      if (is.null(gv) || gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
-      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
-    })
-    yh_genomstromning_riket_serie <- reactive({
-      req(valt_vy() == "genomstromning")
-      genomstromning_riket_yh(hamta_yh_genomstromning(), program_vald())
-    })
-
-    # ---- Etablering: Dalarna-data --------------------------------------------
-    yh_etablering_dalarna <- reactive({
+    # ---- Etablering: urvalets data ------------------------------------------------
+    yh_etablering_urval <- reactive({
       req(valt_vy() == "etablering")
-      d  <- hamta_yh_etablering()
-      gv <- input$geo_val
-      d  <- if (is.null(gv) || gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
-      else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
-
+      d <- niva(geo_filter(hamta_yh_etablering()))
       pf <- input$program_filter
-      if (!is.null(pf) && length(pf) > 0) d <- dplyr::filter(d, program %in% pf)
-
-      d |>
-        dplyr::group_by(ar, exam_ar_interval, antal_ar, program, namn) |>
-        dplyr::summarise(
-          dplyr::across(c(syss, stud, arblos, ovriga, etabl, antal,
-                          etabl_med_inkomst, inkomst_summa),
-                        ~sum(.x, na.rm = TRUE)),
-          .groups = "drop")
+      if (is.null(omrade_drill()) && !is.null(pf) && length(pf) > 0) d <- dplyr::filter(d, program %in% pf)
+      d
     })
-
+    yh_etablering_trend_data <- reactive({
+      req(valt_vy() == "etablering")
+      trend_niva(geo_filter(hamta_yh_etablering()))
+    })
     yh_etablering_riket_serie <- reactive({
       req(valt_vy() == "etablering")
-      ind  <- valt_indikator()
-      prog <- program_vald()
-      yh_etablering_riket(hamta_yh_etablering(), prog, ind$metrik)
+      yh_etablering_riket(yh_riket_rader(hamta_yh_etablering(), omrade_drill(), utb_vald()),
+                          NULL, valt_indikator()$metrik)
     })
-
+    # Riket-andel för valda examensår (referenslinjen i stapeln).
     yh_etablering_riket_andel <- reactive({
-      req(valt_vy() == "etablering")
       av <- antal_ar_vald()
       if (identical(av, "alla")) return(NA_real_)
-      antal_ar_v <- as.integer(av)
-      df <- yh_etablering_riket_serie() |>
-        dplyr::filter(antal_ar == antal_ar_v, ar == as.integer(req(input$ar)))
-      if (nrow(df) == 0) return(NA_real_)
-      mean(df$andel_riket, na.rm = TRUE)
+      ind <- valt_indikator()
+      d <- yh_niva(dplyr::filter(hamta_yh_etablering(), geo_niva == "riket"), omrade_drill()) |>
+        dplyr::filter(antal_ar == as.integer(av), ar %in% examensar_valda())
+      if (is.null(omrade_drill()) && !is.null(input$program_filter))
+        d <- dplyr::filter(d, program %in% input$program_filter)
+      if (sum(d$antal) == 0) NA_real_ else sum(d[[ind$metrik]]) / sum(d$antal)
+    })
+    examensar_text <- function() {
+      v <- examensar_valda()
+      if (length(v) > 1 && all(diff(v) == 1)) paste0(min(v), "\u2013", max(v)) else paste(v, collapse = ", ")
+    }
+    # Spänner valda examensår över definitionsbytet (för någon uppföljningstid)?
+    over_bytet <- reactive({
+      av <- antal_ar_vald()
+      tider <- if (identical(av, "alla")) c(1L, 3L, 5L) else as.integer(av)
+      any(vapply(tider, function(t) {
+        uppf <- examensar_valda() + t
+        any(uppf < YH_DEFINITIONSBYTE) && any(uppf >= YH_DEFINITIONSBYTE)
+      }, logical(1)))
     })
 
     output$brodsmula <- renderText({
@@ -356,110 +397,147 @@ mod_yh_server <- function(id) {
       if (!isTRUE(ind$klar)) {
         return(div(class = "rd-info", "Den här vyn är inte inlagd än."))
       }
+      tillbaka <- if (!is.null(omrade_drill()))
+        actionLink(ns("tillbaka"), "\u2190 Alla utbildningsområden", class = "rd-tillbaka")
       hint <- tags$p(class = "rd-hint rd-hint--bar",
-                     "Klicka på en stapel i diagrammet för att se statistik för ett specifikt utbildningsområde.")
+                     if (is.null(omrade_drill()))
+                       "Klicka på ett utbildningsområde för att se dess utbildningar."
+                     else "Klicka på en utbildning för att se utvecklingen över tid.")
+      trend_id <- switch(valt_vy(), etablering = "d_etablering_trend",
+                         genomstromning = "d_genomstromning_trend", "d_trend")
+      fluidRow(
+        column(7, tillbaka, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint,
+               uiOutput(ns("notiser"))),
+        column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns(trend_id), height = "380px")))
+      )
+    })
 
-      if (valt_vy() == "etablering") {
-        fluidRow(
-          column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
-          column(5, div(class = "rd-subcard",
-                        ggiraph::girafeOutput(ns("d_etablering_trend"), height = "380px")))
-        )
-      } else if (valt_vy() == "genomstromning") {
-        fluidRow(
-          column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
-          column(5, div(class = "rd-subcard",
-                        ggiraph::girafeOutput(ns("d_genomstromning_trend"), height = "380px")))
-        )
-      } else {
-        fluidRow(
-          column(7, ggiraph::girafeOutput(ns("d_bar"), height = "560px"), hint),
-          column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
-        )
+    output$notiser <- renderUI({
+      n <- character(0)
+      if (!is.null(omrade_drill()))
+        n <- c(n, paste0("Utbildningarna bygger ofta på få personer - värden under ", MIN_ANTAL,
+                         " visas inte. Områdets egna siffror (trenden utan vald utbildning)",
+                         " räknas på hela området. De ", .YH_ANTAL_UTBILDNINGAR,
+                         " största utbildningarna visas."))
+      if (valt_vy() == "genomstromning") {
+        s <- dplyr::filter(gs_urval_ar(), ar == as.integer(req(input$ar)))
+        if (nrow(s) == 1 && s$status %in% c("varning", "ofullstandig"))
+          n <- c(n, paste0("Årgången är inte färdig: ", .yh_pagaende_text(s$andel_pagaende),
+                           " av de påbörjade utbildningarna."))
+        n <- c(n, paste0(
+          "De senaste startåren är inte färdiga. De kortare utbildningarna blir klara först, så ",
+          "andelen med examen för en ofullständig årgång kan se för hög eller för låg ut. ",
+          "Årgångar där mer än ", YH_PAGAENDE_DOLJ, " % pågår visas bara om du väljer ",
+          "\"Visa ofullständiga årgångar\"; årgångar där mer än ", YH_PAGAENDE_VARNING,
+          " % pågår markeras."))
       }
+      if (valt_vy() == "etablering") {
+        if (over_bytet())
+          n <- c(n, paste0("Valda examensår ligger både före och efter uppföljningsår ",
+                           YH_DEFINITIONSBYTE, ", då definitionen av utfallet ändrades. ",
+                           "Jämför inte nivåer rakt av över bytet."))
+        n <- c(n, paste0("Från uppföljningsår ", YH_DEFINITIONSBYTE, " bygger utfallet ",
+                         "(sysselsatt, studerande, arbetslös, etablerad) på en annan klassificering ",
+                         "än tidigare - definitionen ändrades. Uppföljningen går till och med ",
+                         YH_SISTA_UPPF_AR, ", så de senaste examensåren finns bara för kortare ",
+                         "uppföljningstid."))
+      }
+      if (length(n) == 0) return(NULL)
+      tags$ul(class = "rd-hint", lapply(n, tags$li))
     })
 
     output$d_bar <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      sub <- filter_underrubrik(med_ar = TRUE)
+      rub <- paste0(ind$amne, dim_text())
 
       if (valt_vy() == "etablering") {
-        d <- yh_etablering_dalarna()
+        d <- dplyr::filter(yh_etablering_urval(), ar %in% examensar_valda())
         validate(need(nrow(d) > 0, "Inga data för valt urval."))
-        d <- dplyr::filter(d, ar == as.integer(req(input$ar)))
+        d <- storsta(d, "antal")
+        sub <- paste0(filter_underrubrik(), " \u00b7 examensår ", examensar_text())
         skapa_diagram_etablering_bar(d, ind$metrik, ind$metrik_label,
                                      antal_ar_val = antal_ar_vald(),
                                      riket_andel = yh_etablering_riket_andel(),
-                                     rubrik = ind$amne, underrubrik = sub, kalla = ind$kalla)
+                                     rubrik = rub, underrubrik = sub, kalla = ind$kalla)
       } else if (valt_vy() == "genomstromning") {
-        d <- dplyr::filter(yh_genomstromning_dalarna(), ar == as.integer(req(input$ar)))
+        d <- data_ar()
         validate(need(nrow(d) > 0, "Inga data för valt urval."))
-        skapa_diagram_genomstromning_bar(d, input$ar, rubrik = ind$amne,
-                                         underrubrik = sub, kalla = ind$kalla)
+        d <- storsta(d, "paborjade")
+        r <- genomstromning_riket_yh(hamta_yh_genomstromning(), omrade_drill()) |>
+          dplyr::filter(ar == as.integer(input$ar))
+        skapa_diagram_yh_genomstromning_bar(
+          d, input$ar, visa_ofullstandiga = visa_ofullstandiga(),
+          riket_andel = if (nrow(r) == 1 && (visa_ofullstandiga() || r$status != "ofullstandig")) r$andel,
+          rubrik = rub, underrubrik = paste0(geo_label(), " \u00b7 startår ", input$ar),
+          kalla = ind$kalla)
       } else {
-        df <- data_ar()
+        df <- storsta(data_ar(), ind$metrik)
         validate(need(nrow(df) > 0, "Inga data för valt urval."))
         skapa_diagram_bar(df, ind$metrik, ind$metrik_label, input$ar,
-                          rubrik = paste0(ind$amne, " efter utbildningsområde"),
-                          underrubrik = sub, kalla = ind$kalla)
+                          rubrik = rub, underrubrik = filter_underrubrik(med_ar = TRUE),
+                          kalla = ind$kalla)
       }
     })
 
+    trend_rubrik <- function(ind) {
+      f <- fokus_text()
+      paste(strwrap(paste0(ind$amne, " \u2013 ", if (is.null(f)) "utveckling över tid" else f),
+                    width = 55), collapse = "\n")
+    }
+
     output$d_etablering_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "etablering")
-      df_dal <- yh_etablering_dalarna()
-      validate(need(nrow(df_dal) > 0, "Inga data."))
-      df_rik <- yh_etablering_riket_serie()
-      prog   <- program_vald()
-      rub    <- if (is.null(prog)) ind$amne else prog
-      antal_ar_in <- antal_ar_vald()
-      antal_ar_v  <- if (identical(antal_ar_in, "alla")) 1L else as.integer(antal_ar_in)
-      sub <- paste0(filter_underrubrik(), " \u00b7 ", antal_ar_v,
-                    " år efter examen, per examensperiod")
-      df_prog <- if (is.null(prog)) df_dal else dplyr::filter(df_dal, namn == prog)
-      skapa_diagram_etablering_trend(df_prog, df_rik,
-                                     ind$metrik, ind$metrik_label,
-                                     antal_ar_val = antal_ar_v,
-                                     rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      df <- yh_etablering_trend_data()
+      validate(need(nrow(df) > 0, "Inga data."))
+      av <- antal_ar_vald()
+      antal_ar_v <- if (identical(av, "alla")) 1L else as.integer(av)
+      skapa_diagram_yh_etablering_trend(
+        df, yh_etablering_riket_serie(), ind$metrik, ind$metrik_label, antal_ar_v,
+        serie_namn = geo_label(), rubrik = trend_rubrik(ind),
+        underrubrik = paste0(geo_label(), " \u00b7 ", antal_ar_v, " år efter examen"),
+        kalla = ind$kalla)
     })
 
     output$d_genomstromning_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar), valt_vy() == "genomstromning")
-      df_dal <- yh_genomstromning_dalarna()
-      validate(need(nrow(df_dal) > 0, "Inga data."))
-      df_rik <- yh_genomstromning_riket_serie()
-      prog   <- program_vald()
-      rub    <- if (is.null(prog)) ind$amne else prog
-      sub    <- filter_underrubrik()
-      df_prog <- if (is.null(prog)) df_dal else dplyr::filter(df_dal, program == prog)
-      df_prog <- yh_genomstromning_per_ar(df_prog)   # viktad andel per år
-      skapa_diagram_genomstromning_trend(df_prog, df_rik, program_sel = prog,
-                                         rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      u <- gs_urval_ar()
+      validate(need(nrow(u) > 0, "Inga data."))
+      r <- genomstromning_riket_yh(hamta_yh_genomstromning(), omrade_drill(), utb_vald())
+      d <- dplyr::bind_rows(dplyr::mutate(u, serie = geo_label()), dplyr::mutate(r, serie = "Riket"))
+      skapa_diagram_yh_genomstromning_trend(d, visa_ofullstandiga(), rubrik = trend_rubrik(ind),
+                                            underrubrik = paste0(geo_label(), " jämfört med riket"),
+                                            kalla = ind$kalla)
     })
 
     output$d_trend <- ggiraph::renderGirafe({
       ind <- valt_indikator(); req(isTRUE(ind$klar))
-      df   <- data_bas()
+      df <- trend_niva(data_bas())
       validate(need(nrow(df) > 0, "Inga data."))
-      prog <- program_vald()
-      rub  <- if (is.null(prog)) paste0(ind$amne, " \u2013 utveckling över tid") else paste0(ind$amne, " \u2013 ", prog)
-      sub  <- filter_underrubrik()
-      skapa_diagram_trend(df, ind$metrik, ind$metrik_label, prog,
-                          rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      skapa_diagram_trend(df, ind$metrik, ind$metrik_label, NULL,
+                          rubrik = trend_rubrik(ind), underrubrik = filter_underrubrik(),
+                          kalla = ind$kalla)
     })
 
-    # Etableringsdata laddas ner summerad (se summera_etablering_nedladdning()).
-    nedladdning <- function(d) {
-      if (identical(input$omrade, "etablering")) summera_etablering_nedladdning(d) else d
+    # Nedladdning: aktuell nivå. Etableringen summeras (se
+    # summera_etablering_nedladdning()), genomströmningen får andelarna.
+    urval_data <- function() {
+      if (valt_vy() == "etablering")
+        return(summera_etablering_nedladdning(dplyr::filter(yh_etablering_urval(), ar %in% examensar_valda())))
+      d <- data_ar()
+      if (valt_vy() == "genomstromning") d <- yh_genomstromning_summera(d, grupp = "program")
+      d
     }
-
     output$ladda_ner <- downloadHandler(
-      filename = function() paste0("yh_", input$omrade, "_", input$indikator, "_", input$ar, ".xlsx"),
-      content  = function(file) skriv_gymnasie_excel(nedladdning(data_ar()), file, blad = "YH")
+      filename = function() paste0("yh_", input$omrade, "_", input$indikator, ".xlsx"),
+      content  = function(file) skriv_gymnasie_excel(urval_data(), file, blad = "YH")
     )
     output$ladda_ner_alla <- downloadHandler(
       filename = function() "yh_hela_datasetet.xlsx",
-      content  = function(file) skriv_gymnasie_excel(nedladdning(aktuell_data()), file, blad = "YH")
+      content  = function(file) {
+        d <- aktuell_data()
+        if (identical(input$omrade, "etablering")) d <- summera_etablering_nedladdning(d)
+        skriv_gymnasie_excel(d, file, blad = "YH")
+      }
     )
   })
 }

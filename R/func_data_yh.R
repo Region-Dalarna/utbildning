@@ -4,22 +4,32 @@
 #
 #  Källor (alla i oppna_data.mikro_db, skrivna av ett separat inläsningsskript):
 #  - yh_studerande        påbörjade/pågående/examen per år
-#  - yh_genomstromning    andel examen bland avslutade, per startår
-#  - yh_uppfoljning       RAKS-etablering 1/3/5 år efter examen (redan
-#                         summerad per region, utan hem-/arbetskommun)
+#  - yh_genomstromning    utfall per startår: examen, utan examen, pågående
+#  - yh_uppfoljning       RAKS-etablering 1/3/5 år efter examen, ett
+#                         examensår i taget
 #
-#  Tabellerna har redan en korrekt geo_niva (riket/lan/kommun) och en färdig
-#  länsrad (regionkod "20"), så ingen egen viktning behövs för Hela Dalarna.
+#  GRANULARITET: tabellerna har två nivåer i samma tabell - "Omrade" (per
+#  utbildningsområde) och "Utbildning" (per område och utbildningsnamn).
+#  Filtrera ALLTID på en nivå (yh_niva()); summeras båda räknas allt dubbelt.
+#  Områdets egna siffror tas från Omrade-raderna, inte som summan av
+#  utbildningarna (små utbildningsceller döljs, då blir summan för låg).
 #
-#  Kolumner döps om till samma kontrakt som func_diagram.R:s generiska
-#  diagramfunktioner förväntar (program, namn, andel, kommkod, geo_niva, ar)
-#  - så att diagramfunktionerna kan återanvändas OFÖRÄNDRADE, precis som för
-#  gymnasiet. "program" = utbildningsomrade.
-#
-#  Förenklingar i denna första version:
-#  - Kön och studieform summeras ihop (ingen kön/studieform-vy än).
-#  - Ingen samverkansområde/karta - bara Kommun/Hela Dalarna/Riket.
+#  Tabellerna har en korrekt geo_niva (riket/lan/kommun) och en färdig
+#  länsrad (regionkod "20"). Kön, studieform och Match summeras ihop.
+#  "program" = utbildningsområde (diagramfunktionernas kolumnkontrakt).
 # ============================================================
+
+# Genomströmning: andel pågående (pagaende_kvar / paborjade) som avgör om en
+# startårgång räknas som färdig. Upp till VARNING visas normalt, upp till
+# DOLJ med varning, över DOLJ döljs om inte användaren väljer att visa.
+YH_PAGAENDE_VARNING <- 5
+YH_PAGAENDE_DOLJ    <- 50
+
+# Etablering: uppföljningsåret får inte vara senare än sista året med
+# inkomstuppgifter. Från uppföljningsår 2020 bygger utfallet på en annan
+# klassificering (HuvInkKalla/ArbInkNiva i stället för RAKS) - brott i serien.
+YH_SISTA_UPPF_AR     <- 2023
+YH_DEFINITIONSBYTE   <- 2020
 
 .yh_hamta_tabell <- function(tabell) {
   con <- shiny_uppkoppling_las("oppna_data")
@@ -29,20 +39,39 @@
   rad
 }
 
+# Äldre tabeller utan granularitet räknas som områdesnivå.
+.yh_granularitet <- function(rad) {
+  if (!"granularitet" %in% names(rad)) rad$granularitet <- "Omrade"
+  if (!"utbildningsnamn" %in% names(rad)) rad$utbildningsnamn <- NA_character_
+  rad
+}
+
+# Rader för en nivå: områdesnivån (omrade = NULL) eller utbildningarna i ett
+# område, med "program" = utbildningsnamn så att diagramfunktionerna visar dem.
+yh_niva <- function(d, omrade = NULL) {
+  if (is.null(omrade)) return(dplyr::filter(d, granularitet == "Omrade"))
+  d <- d |>
+    dplyr::filter(granularitet == "Utbildning", program == omrade) |>
+    dplyr::mutate(program = dplyr::coalesce(utbildningsnamn, "Okänd utbildning"))
+  if ("namn" %in% names(d)) d$namn <- d$program
+  d
+}
+
 # ---- Studerande --------------------------------------------------------
 .yh_studerande_cache <- new.env(parent = emptyenv())
 
 rensa_yh_studerande <- function(rad) {
-  rad |>
+  .yh_granularitet(rad) |>
     dplyr::rename(
       kommkod = regionkod,
       kommun  = region,
       program = utbildningsomrade
     ) |>
     dplyr::mutate(ar = as.integer(ar), kommkod = as.character(kommkod)) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
+    dplyr::group_by(ar, kommkod, kommun, geo_niva, granularitet, program, utbildningsnamn) |>
     dplyr::summarise(
-      dplyr::across(c(paborjad, pagaende, avslutad, examen, avslutad_utan_examen),
+      dplyr::across(dplyr::any_of(c("paborjad", "pagaende", "avslutad", "examen",
+                                    "avslutad_utan_examen", "resultat_saknas")),
                     ~sum(.x, na.rm = TRUE)),
       .groups = "drop"
     )
@@ -59,6 +88,8 @@ hamta_yh_studerande <- function(force = FALSE) {
 .yh_genomstromning_cache <- new.env(parent = emptyenv())
 
 rensa_yh_genomstromning <- function(rad) {
+  rad <- .yh_granularitet(rad)
+  for (k in setdiff(c("resultat_saknas", "pagaende_kvar"), names(rad))) rad[[k]] <- 0
   rad |>
     dplyr::rename(
       kommkod = regionkod,
@@ -67,13 +98,13 @@ rensa_yh_genomstromning <- function(rad) {
       program = utbildningsomrade
     ) |>
     dplyr::mutate(ar = as.integer(ar), kommkod = as.character(kommkod)) |>
-    dplyr::group_by(ar, kommkod, kommun, geo_niva, program) |>
+    dplyr::group_by(ar, kommkod, kommun, geo_niva, granularitet, program, utbildningsnamn) |>
     dplyr::summarise(
-      dplyr::across(c(paborjade, avslutade, examen, avslutad_utan_examen),
+      dplyr::across(c(paborjade, avslutade, examen, avslutad_utan_examen,
+                      resultat_saknas, pagaende_kvar),
                     ~sum(.x, na.rm = TRUE)),
       .groups = "drop"
-    ) |>
-    dplyr::mutate(andel = dplyr::if_else(avslutade > 0, 100 * examen / avslutade, NA_real_))
+    )
 }
 
 hamta_yh_genomstromning <- function(force = FALSE) {
@@ -83,24 +114,41 @@ hamta_yh_genomstromning <- function(force = FALSE) {
   .yh_genomstromning_cache$df
 }
 
-# Slår ihop valda rader till EN viktad andel per år (summa examen / summa
-# avslutade). Diagramfunktionerna för genomströmning tar ett ovägt medel av
-# andel per år, så datan skickas in färdigaggregerad för att få en korrekt
-# total över alla utbildningsområden.
-yh_genomstromning_per_ar <- function(df) {
-  df |>
-    dplyr::group_by(ar) |>
-    dplyr::summarise(avslutade = sum(avslutade, na.rm = TRUE),
-                     examen    = sum(examen, na.rm = TRUE), .groups = "drop") |>
-    dplyr::mutate(andel = dplyr::if_else(avslutade > 0, 100 * examen / avslutade, NA_real_))
+# Hur färdig en startårgång är, utifrån andel pågående (%).
+yh_arsstatus <- function(andel_pagaende) {
+  dplyr::case_when(
+    is.na(andel_pagaende)                  ~ NA_character_,
+    andel_pagaende <= YH_PAGAENDE_VARNING  ~ "komplett",
+    andel_pagaende <= YH_PAGAENDE_DOLJ     ~ "varning",
+    TRUE                                   ~ "ofullstandig")
 }
 
-# Riket-serie för jämförelselinjen. program_val = NULL -> alla områden.
-genomstromning_riket_yh <- function(df_full, program_val = NULL) {
-  d <- dplyr::filter(df_full, geo_niva == "riket")
-  if (!is.null(program_val)) d <- dplyr::filter(d, program == program_val)
-  yh_genomstromning_per_ar(d) |>
-    dplyr::select(ar, andel_riket = andel)
+# Summerar valda rader per år (och ev. grupp) till andel med examen
+# (examen / avslutade), andel pågående (pagaende_kvar / paborjade) och
+# årgångsstatus. Komplettheten räknas alltså för just det urvalet.
+yh_genomstromning_summera <- function(df, grupp = NULL) {
+  df |>
+    dplyr::group_by(dplyr::across(dplyr::all_of(c("ar", grupp)))) |>
+    dplyr::summarise(dplyr::across(c(paborjade, avslutade, examen, pagaende_kvar),
+                                   ~sum(.x, na.rm = TRUE)), .groups = "drop") |>
+    dplyr::mutate(
+      andel          = dplyr::if_else(avslutade > 0, 100 * examen / avslutade, NA_real_),
+      andel_pagaende = dplyr::if_else(paborjade > 0, 100 * pagaende_kvar / paborjade, NA_real_),
+      status         = yh_arsstatus(andel_pagaende))
+}
+
+# Riksrader på samma nivå som urvalet: hela riket (områdesnivå), ett område
+# (dess Omrade-rader) eller en utbildning i området.
+yh_riket_rader <- function(df_full, omrade = NULL, utbildning = NULL) {
+  d <- yh_niva(dplyr::filter(df_full, geo_niva == "riket"), if (!is.null(utbildning)) omrade)
+  if (!is.null(utbildning)) dplyr::filter(d, program == utbildning)
+  else if (!is.null(omrade)) dplyr::filter(d, program == omrade)
+  else d
+}
+
+# Riket-serie för jämförelselinjen (se yh_riket_rader()).
+genomstromning_riket_yh <- function(df_full, omrade = NULL, utbildning = NULL) {
+  yh_genomstromning_summera(yh_riket_rader(df_full, omrade, utbildning))
 }
 
 # ---- Etablering (SCB/RAKS) ------------------------------------------------
@@ -110,8 +158,11 @@ genomstromning_riket_yh <- function(df_full, program_val = NULL) {
 # inkomst_summa / etabl_med_inkomst.
 .yh_etablering_cache <- new.env(parent = emptyenv())
 
+# YH: ett examensår per rad (exam_ar_interval "2013-2013"); ar = examensåret.
+# Summeras över kön och Match (yrkesmatchning, ingen indikator än).
+# Används även för hogskola_etablering (samma kolumner).
 rensa_yh_etablering <- function(rad) {
-  rad |>
+  .yh_granularitet(rad) |>
     dplyr::rename(
       kommkod = regionkod,
       kommun  = region,
@@ -123,7 +174,7 @@ rensa_yh_etablering <- function(rad) {
       antal_ar = as.integer(antal_ar)
     ) |>
     dplyr::group_by(ar, exam_ar_interval, uppf_ar_interval, antal_ar,
-                    kommkod, kommun, geo_niva, program) |>
+                    kommkod, kommun, geo_niva, granularitet, program, utbildningsnamn) |>
     dplyr::summarise(
       dplyr::across(c(syss, stud, arblos, ovriga, antal, etabl,
                       etabl_med_inkomst, inkomst_summa),
@@ -135,14 +186,19 @@ rensa_yh_etablering <- function(rad) {
 
 hamta_yh_etablering <- function(force = FALSE) {
   if (force || is.null(.yh_etablering_cache$df)) {
-    .yh_etablering_cache$df <- rensa_yh_etablering(.yh_hamta_tabell("yh_uppfoljning"))
+    # Uppföljningsår efter YH_SISTA_UPPF_AR saknar inkomstuppgifter - tas bort.
+    .yh_etablering_cache$df <- rensa_yh_etablering(.yh_hamta_tabell("yh_uppfoljning")) |>
+      dplyr::filter(ar + antal_ar <= YH_SISTA_UPPF_AR)
   }
   .yh_etablering_cache$df
 }
 
-# Riket-andel per program och antal_ar (jämförelselinje i trend).
-# program_val = NULL -> alla program sammanslagna (totalvy). Samma mönster
-# som gymnasiets etablering_riket() i func_data.R.
+# Första examensåret med den nya definitionen för en uppföljningstid.
+yh_forsta_nya_examensar <- function(antal_ar) YH_DEFINITIONSBYTE - as.integer(antal_ar)
+
+# Riket-andel per år och antal_ar (jämförelselinje). program_val = NULL ->
+# alla program. YH skickar in riksrader på rätt nivå (yh_riket_rader());
+# Högskolan sina Region-rader.
 yh_etablering_riket <- function(df_full, program_val = NULL, metrik) {
   d <- df_full |> dplyr::filter(geo_niva == "riket")
   if (!is.null(program_val)) d <- dplyr::filter(d, program == program_val)

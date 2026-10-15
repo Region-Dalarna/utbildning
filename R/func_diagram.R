@@ -920,6 +920,184 @@ skapa_diagram_genomstromning_bar <- function(df, ar = NULL,
 }
 
 # ============================================================
+#  YH-genomströmning med ofullständiga startårgångar
+# ============================================================
+# Status (yh_arsstatus()): "komplett" (högst YH_PAGAENDE_VARNING % pågår),
+# "varning" (upp till YH_PAGAENDE_DOLJ %), "ofullstandig" (mer). Ofullständiga
+# visas bara med visa_ofullstandiga = TRUE, och då markerade.
+.YH_STATUS_TEXT <- c(komplett = "Färdig årgång", varning = "Årgången inte färdig",
+                     ofullstandig = "Ofullständig årgång")
+.yh_pagaende_text <- function(p) paste0(scales::number(p, accuracy = 1), " % pågår")
+
+# Stapel per program (område eller utbildning). d: en rad per program med
+# examen, avslutade, paborjade, pagaende_kvar.
+skapa_diagram_yh_genomstromning_bar <- function(d, ar = NULL, visa_ofullstandiga = FALSE,
+                                                riket_andel = NULL, rubrik = NULL,
+                                                underrubrik = NULL, kalla = NULL,
+                                                min_antal = MIN_ANTAL) {
+  d <- d |>
+    dplyr::mutate(ar = 0L) |>
+    yh_genomstromning_summera(grupp = "program") |>
+    dplyr::filter(!is.na(andel) | status == "ofullstandig")
+  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.8, 7))
+  fyll <- c(komplett = RD_PRIMARY, varning = rd_farg("rd-blue-light", "#8edded"))
+  d <- d |>
+    dplyr::mutate(
+      dold   = .dold(avslutade, min_antal),
+      gomd   = status == "ofullstandig" & !visa_ofullstandiga,
+      varde  = dplyr::if_else(dold | gomd | is.na(andel), 0, andel),
+      grupp  = dplyr::if_else(status == "komplett", "komplett", "varning"),
+      program = forcats::fct_reorder(program, varde),
+      tooltip = paste0("<b>", program, "</b><br/>", .metrik_ar("Andel med examen", ar), ": ",
+                       dplyr::case_when(
+                         gomd ~ "visas inte",
+                         dold ~ .dold_text(min_antal),
+                         TRUE ~ paste0(scales::number(andel, accuracy = 0.1), " %")),
+                       dplyr::if_else(status == "komplett", "",
+                                      paste0("<br/>", .YH_STATUS_TEXT[status], ": ",
+                                             .yh_pagaende_text(andel_pagaende)))),
+      data_id = as.character(program))
+  legend <- if (any(d$grupp == "varning" & !d$gomd))
+    c(komplett = "Färdig årgång", varning = paste0("Ej färdig (över ", YH_PAGAENDE_VARNING, " % pågår)"))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = program)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = data_id, fill = grupp), width = 0.74) +
+    ggplot2::scale_fill_manual(values = fyll, labels = legend, breaks = names(legend),
+                               name = NULL, guide = if (is.null(legend)) "none" else "legend") +
+    ggplot2::scale_x_continuous(labels = function(x) paste0(x, " %"),
+                                expand = ggplot2::expansion(mult = c(0, 0.04))) +
+    ggplot2::labs(x = "Andel med examen (%)", y = NULL,
+                  title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, any(d$dold), min_antal)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top")
+  if (any(d$dold & !d$gomd)) g <- g + .dold_etikett(dplyr::filter(d, dold, !gomd), "program", min_antal)
+  if (any(d$gomd))
+    g <- g + ggplot2::geom_text(data = dplyr::filter(d, gomd), ggplot2::aes(x = 0, y = program),
+                                label = "ofullständig årgång", hjust = -0.05, size = 2.8,
+                                colour = RD_TEXT_MUTED, fontface = "italic", inherit.aes = FALSE)
+  if (!is.null(riket_andel) && !is.na(riket_andel))
+    g <- g +
+      ggplot2::geom_vline(xintercept = riket_andel, linetype = "dashed",
+                          color = RD_TEXT_MUTED, linewidth = 0.7) +
+      ggplot2::annotate("text", x = riket_andel, y = Inf,
+                        label = paste0("Riket ", scales::number(riket_andel, accuracy = 0.1), " %"),
+                        hjust = 1.08, vjust = 1.5, size = 2.8, color = RD_TEXT_MUTED)
+
+  .girafe_std(g, width_svg = 6.8, height_svg = max(4, nrow(d) * 0.3 + 2), selection = TRUE)
+}
+
+# Linje per serie (urvalet och riket). d: en rad per (serie, ar) med andel,
+# avslutade, andel_pagaende, status (se yh_genomstromning_summera()).
+# Färdiga år ritas heldragna; ej färdiga streckade, med ihåliga punkter och
+# skuggning (efter urvalets status). Ofullständiga år tas bara med när
+# visa_ofullstandiga = TRUE.
+skapa_diagram_yh_genomstromning_trend <- function(d, visa_ofullstandiga = FALSE,
+                                                  rubrik = NULL, underrubrik = NULL,
+                                                  kalla = NULL, min_antal = MIN_ANTAL) {
+  dolda <- any(.dold(d$avslutade, min_antal) & d$serie != "Riket")
+  d <- d |>
+    dplyr::filter(!is.na(status), visa_ofullstandiga | status != "ofullstandig") |>
+    dplyr::mutate(andel = dplyr::if_else(.dold(avslutade, min_antal) & serie != "Riket",
+                                         NA_real_, andel)) |>
+    dplyr::arrange(serie, ar) |>
+    dplyr::group_by(serie) |>
+    dplyr::mutate(
+      fardig = status == "komplett",
+      # Streckad del: ej färdiga år plus det sista färdiga, så att linjen hänger ihop.
+      sist_fardig = ar == suppressWarnings(max(ar[fardig])),
+      andel_hel   = dplyr::if_else(fardig, andel, NA_real_),
+      andel_streck = dplyr::if_else(!fardig | sist_fardig, andel, NA_real_)) |>
+    dplyr::ungroup() |>
+    dplyr::mutate(tooltip = paste0(serie, " ", ar, ": ", scales::number(andel, accuracy = 0.1), " %",
+                                   dplyr::if_else(fardig, "", paste0("<br/>", .YH_STATUS_TEXT[status], ", ",
+                                                                     .yh_pagaende_text(andel_pagaende)))))
+  if (all(is.na(d$andel))) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+
+  serier <- unique(d$serie)
+  farger <- stats::setNames(c(RD_PRIMARY, RD_TEXT_MUTED)[seq_along(serier)], serier)
+  # Skuggning efter urvalets (första seriens) status.
+  skugga <- dplyr::filter(d, serie == serier[1], !fardig)
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, colour = serie, group = serie))
+  if (nrow(skugga) > 0)
+    g <- g + ggplot2::geom_rect(data = skugga, ggplot2::aes(xmin = ar - 0.5, xmax = ar + 0.5),
+                                ymin = -Inf, ymax = Inf, fill = "#eef2f5", colour = NA,
+                                inherit.aes = FALSE)
+  g <- g +
+    ggplot2::geom_line(ggplot2::aes(y = andel_hel), linewidth = 0.9, na.rm = TRUE) +
+    ggplot2::geom_line(ggplot2::aes(y = andel_streck), linewidth = 0.9, linetype = "22", na.rm = TRUE) +
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(y = andel, tooltip = tooltip, data_id = paste(serie, ar),
+                   shape = dplyr::if_else(fardig, "fardig", "ej")),
+      size = 2.4, fill = "white", stroke = 1, na.rm = TRUE) +
+    ggplot2::scale_shape_manual(values = c(fardig = 16, ej = 21), guide = "none") +
+    ggplot2::scale_colour_manual(values = farger, name = NULL) +
+    ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(labels = function(x) paste0(x, " %"), limits = c(0, NA)) +
+    ggplot2::labs(x = "Startår", y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste(c(.kalltext(kalla, dolda, min_antal),
+                                    if (nrow(skugga) > 0)
+                                      "Skuggat och streckat: årgången är inte färdig."),
+                                  collapse = "\n")) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+
+  .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
+}
+
+# YH-etablering över examensår: urvalet och riket, ett uppföljningsår.
+# En lodrät streckad linje markerar var definitionen ändrades (första
+# examensåret med uppföljningsår YH_DEFINITIONSBYTE).
+skapa_diagram_yh_etablering_trend <- function(df_urval, df_riket, metrik, metrik_label,
+                                              antal_ar_val, serie_namn = "Dalarna",
+                                              rubrik = NULL, underrubrik = NULL,
+                                              kalla = NULL, min_antal = MIN_ANTAL) {
+  d_u <- df_urval |>
+    dplyr::filter(antal_ar == antal_ar_val) |>
+    dplyr::group_by(ar) |>
+    dplyr::summarise(status_sum = sum(.data[[metrik]], na.rm = TRUE),
+                     antal_sum  = sum(antal, na.rm = TRUE), .groups = "drop") |>
+    dplyr::mutate(andel = dplyr::if_else(antal_sum > 0 & !.dold(antal_sum, min_antal),
+                                         status_sum / antal_sum, NA_real_),
+                  serie = serie_namn)
+  dolda <- any(.dold(d_u$antal_sum, min_antal))
+  d_r <- df_riket |>
+    dplyr::filter(antal_ar == antal_ar_val) |>
+    dplyr::transmute(ar, andel = andel_riket, serie = "Riket")
+  d <- dplyr::bind_rows(d_u, d_r) |>
+    dplyr::mutate(tooltip = paste0(serie, ", examensår ", ar, ": ", scales::percent(andel, accuracy = 0.1)))
+  if (all(is.na(d$andel))) return(.girafe_std(.tom_plot("Inga data"), 5, 3.3))
+
+  byte <- yh_forsta_nya_examensar(antal_ar_val)
+  farger <- stats::setNames(c(RD_PRIMARY, RD_TEXT_MUTED), c(serie_namn, "Riket"))
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = andel, colour = serie, group = serie,
+                                       linetype = serie)) +
+    ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE) +
+    ggiraph::geom_point_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar)),
+                                    size = 2.2, na.rm = TRUE) +
+    ggplot2::scale_colour_manual(values = farger, name = NULL) +
+    ggplot2::scale_linetype_manual(values = stats::setNames(c("solid", "dashed"), names(farger)),
+                                   guide = "none") +
+    ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, NA)) +
+    ggplot2::labs(x = "Examensår", y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = .kalltext(kalla, dolda, min_antal)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
+  if (byte > min(d$ar) && byte <= max(d$ar))
+    g <- g +
+      ggplot2::geom_vline(xintercept = byte - 0.5, linetype = "dotted", colour = RD_TEXT, linewidth = 0.5) +
+      ggplot2::annotate("text", x = byte - 0.4, y = -Inf, label = "Ny definition", hjust = 0,
+                        vjust = -0.6, size = 2.6, colour = RD_TEXT)
+
+  .girafe_std(g, width_svg = 5, height_svg = 3.3, selection = FALSE)
+}
+
+# ============================================================
 #  Etablering: grupperad stapel (antal år) + Dalarna vs Riket-trend
 # ============================================================
 
