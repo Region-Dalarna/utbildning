@@ -112,8 +112,10 @@ skapa_diagram_vattenfall <- function(start, faktorer, slut, rubrik = NULL, under
   if (is.na(start) || is.na(slut) || nrow(faktorer) == 0)
     return(.girafe_std(.tom_plot("Ingen framskrivning för gruppen"), 6.5, 3.6))
   steg <- dplyr::select(faktorer, namn = faktor_text, varde)
+  # Avrundning ger ofta någon enstaka person - bara märkbara skillnader
+  # (minst 1 % av tillgången 2023) får en egen stapel.
   rest <- slut - start - sum(steg$varde, na.rm = TRUE)
-  if (abs(rest) >= 1) steg <- dplyr::bind_rows(steg, tibble::tibble(namn = "Övrigt och avrundning", varde = rest))
+  if (abs(rest) >= max(1, 0.01 * abs(start))) steg <- dplyr::bind_rows(steg, tibble::tibble(namn = "Övrigt och avrundning", varde = rest))
   d <- dplyr::bind_rows(
     tibble::tibble(namn = "Tillgång 2023", varde = start, typ = "total", fran = 0, till = start),
     steg |> dplyr::mutate(typ = dplyr::if_else(varde >= 0, "okning", "minskning"),
@@ -203,4 +205,37 @@ skapa_diagram_bedomning_lan <- function(d, vald_regionkod, rubrik = NULL, underr
   if (length(riket) == 1)
     g <- g + ggplot2::geom_vline(xintercept = riket, linetype = "dashed", colour = RD_TEXT_MUTED)
   .girafe_std(g, width_svg = 5, height_svg = max(3.5, nrow(d) * 0.2 + 1.6), selection = FALSE)
+}
+
+# ---- Karta: bedömningen i Sveriges län ----------------------------------------------
+# geo: länens geometri (hamta_lan_geometri()), d: bedömningsraderna för en
+# utbildningsgrupp i alla län. Län utan prognos grå. Klick ger regionkod.
+REGTOP_SAKNAS_FARG <- "#e9ecef"
+skapa_karta_bedomning <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, kalla = KALLA_REGTOP) {
+  d <- dplyr::filter(d, regionkod != "00") |>
+    dplyr::transmute(regionkod, region, balanstal_procent,
+                     klass = dplyr::if_else(har_bedomning, as.character(bedomning_2040), "Prognos saknas"))
+  k <- dplyr::left_join(geo, d, by = "regionkod") |>
+    dplyr::filter(!is.na(region)) |>
+    dplyr::mutate(
+      klass = factor(dplyr::coalesce(klass, "Prognos saknas"), levels = c(REGTOP_BEDOMNINGAR, "Prognos saknas")),
+      vald  = regionkod %in% vald_regionkod,
+      tooltip = paste0("<b>", region, "</b><br/>", klass,
+                       dplyr::if_else(is.na(balanstal_procent), "",
+                                      paste0(" (balanstal ", .fmt_proc(balanstal_procent), ")"))))
+  if (nrow(k) == 0) return(.girafe_std(.tom_plot("Ingen karta"), 4, 6))
+  farger <- c(BEDOMNING_FARGER, "Prognos saknas" = REGTOP_SAKNAS_FARG)
+  g <- ggplot2::ggplot(k) +
+    ggiraph::geom_sf_interactive(ggplot2::aes(fill = klass, tooltip = tooltip, data_id = regionkod),
+                                 colour = "white", linewidth = 0.2) +
+    ggplot2::geom_sf(data = dplyr::filter(k, vald), fill = NA, colour = RD_TEXT, linewidth = 0.7) +
+    ggplot2::scale_fill_manual(values = farger, name = NULL,
+                               breaks = intersect(names(farger), as.character(k$klass))) +
+    ggplot2::labs(title = rubrik, caption = paste0("Källa: ", kalla)) +
+    ggplot2::theme_void() +
+    ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", size = 11),
+                   plot.caption = ggplot2::element_text(size = 6.5, colour = RD_TEXT_MUTED, hjust = 0),
+                   legend.text = ggplot2::element_text(size = 8),
+                   legend.position = "right")
+  .girafe_std(g, width_svg = 4.6, height_svg = 6, selection = TRUE)
 }

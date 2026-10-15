@@ -108,5 +108,11 @@ regtop_vanligaste_yrken <- function(regionkod, kod) {
   if (is.na(yrke_kol)) return(character(0))
   d <- dplyr::filter(d, .data$regionkod == .env$regionkod, utbildningsgrupp_kod == kod)
   if ("rang" %in% names(d)) d <- dplyr::arrange(d, rang)
-  unique(d[[yrke_kol]])
+  # Andel (eller antal) inom parentes, när den finns.
+  tillagg <- if (all(c("varde", "enhet") %in% names(d)))
+    dplyr::case_when(is.na(d$varde)          ~ "",
+                     d$enhet %in% "procent" ~ paste0(" (", scales::number(d$varde, accuracy = 1), " %)"),
+                     TRUE                    ~ paste0(" (", scales::number(d$varde, big.mark = " "), ")"))
+  else ""
+  unique(paste0(d[[yrke_kol]], tillagg))
 }

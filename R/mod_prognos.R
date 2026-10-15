@@ -135,8 +135,12 @@ mod_prognos_server <- function(id) {
           column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_efterfragan"), height = "330px")))
         ),
         fluidRow(
-          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_lan"), height = "480px"))),
-          column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_kon"), height = "330px")))
+          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_lan"), height = "520px"))),
+          column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_karta"), height = "520px"),
+                        tags$p(class = "rd-hint", "Klicka på ett län för att byta län.")))
+        ),
+        fluidRow(
+          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_kon"), height = "330px")))
         )
       )
     })
@@ -232,6 +236,20 @@ mod_prognos_server <- function(id) {
       d <- dplyr::filter(regtop_bedomning(), utbildningsgrupp_kod == grupp_vald())
       skapa_diagram_bedomning_lan(d, region(), rubrik = "Samma utbildningsgrupp i alla län",
                                   underrubrik = "Balanstal och bedömning 2040")
+    })
+
+    # Karta: bedömningen för gruppen i alla län. Klick byter län.
+    output$d_karta <- ggiraph::renderGirafe({
+      geo <- hamta_lan_geometri()
+      validate(need(!is.null(geo), paste0("Kartan kunde inte läsas",
+                                          if (!is.null(.geo_cache$fel_lan)) paste0(": ", .geo_cache$fel_lan) else ".")))
+      d <- dplyr::filter(regtop_bedomning(), utbildningsgrupp_kod == grupp_vald())
+      skapa_karta_bedomning(geo, d, region(), rubrik = "Bedömning 2040 per län")
+    })
+    observeEvent(input$d_karta_selected, {
+      sel <- input$d_karta_selected
+      if (length(sel) == 1 && sel %in% regtop_regioner())
+        shinyWidgets::updatePickerInput(session, "region", selected = sel)
     })
 
     # ---- Nedladdning ------------------------------------------------------------------

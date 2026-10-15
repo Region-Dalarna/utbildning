@@ -38,6 +38,40 @@
   dplyr::left_join(geo, kommun_samverkan, by = "kommkod")
 }
 
+# Sveriges län (för Prognos 2040): kommunerna i hela landet slås ihop per
+# län (de två första siffrorna i kommunkoden) och förenklas, så att kartan
+# blir lätt att rita. Läses en gång per R-process.
+.las_lan_geometri <- function() {
+  if (!requireNamespace("sf", quietly = TRUE)) {
+    .geo_cache$fel_lan <- "paketet sf är inte installerat"
+    return(NULL)
+  }
+  tryCatch({
+    con <- shiny_uppkoppling_las("geodata")
+    if (is.null(con)) stop("kunde inte koppla upp mot geodata-databasen")
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+    geo <- dplyr::tbl(con, dbplyr::in_schema("karta", "kommun_scb")) |>
+      dplyr::collect() |>
+      df_till_sf()
+    if (isTRUE(sf::st_is_longlat(geo))) geo <- sf::st_transform(geo, 3006)
+    geo |>
+      dplyr::mutate(regionkod = substr(as.character(knkod), 1, 2)) |>
+      dplyr::group_by(regionkod) |>
+      dplyr::summarise(.groups = "drop") |>
+      sf::st_simplify(dTolerance = 1500, preserveTopology = TRUE) |>
+      sf::st_transform(crs = 4326)
+  }, error = function(e) {
+    .geo_cache$fel_lan <- conditionMessage(e)
+    message("Länskartan kunde inte läsas: ", conditionMessage(e))
+    NULL
+  })
+}
+
+hamta_lan_geometri <- function() {
+  if (is.null(.geo_cache$lan)) .geo_cache$lan <- .las_lan_geometri()
+  .geo_cache$lan
+}
+
 hamta_kommun_geometri <- function() {
   if (is.null(.geo_cache$geo)) .geo_cache$geo <- .las_kommun_geometri()
   .geo_cache$geo
