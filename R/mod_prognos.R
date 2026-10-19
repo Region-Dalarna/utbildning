@@ -355,6 +355,17 @@ mod_prognos_server <- function(id) {
         error = function(e) NULL)
     })
 
+    # Vanligaste yrken har vi faktiska antal/andelar för (topp 3 per grupp och
+    # län) - för övriga yrken i antaganden-tabellen vet vi inte hur många
+    # individer det rör sig om. De tre här avgör därför både "Vanligaste
+    # yrken" i faktarutan och vilka yrken som visas direkt (i stället för
+    # infällda) i antaganden-modalen nedan.
+    vanligaste_yrken_data <- reactive({
+      req(grupp_vald())
+      tryCatch(regtop_vanligaste_yrken(region(), grupp_vald()), error = function(e)
+        tibble::tibble(yrke = character(0), text = character(0)))
+    })
+
     output$faktaruta <- renderUI({
       r <- grupp_rad()
       if (nrow(r) == 0) return(tags$p(class = "rd-hint", "Gruppen saknas för valt län."))
@@ -374,12 +385,12 @@ mod_prognos_server <- function(id) {
                  paste0("Efterfrågan: ", .fmt_antal(r$efterfragan_2023), " (2023) → ",
                         .fmt_antal(r$efterfragan_2040), " (2040)")))
       } else tags$p(class = "rd-hint", "SCB gör ingen framskrivning till 2040 för gruppen i det här länet.")
-      yrken <- tryCatch(regtop_vanligaste_yrken(region(), grupp_vald()), error = function(e) character(0))
+      yrken <- vanligaste_yrken_data()
       ant <- antaganden_data()
       tagList(
         bed,
-        if (length(yrken) > 0) tagList(tags$div(class = "rd-label", "Vanligaste yrken"),
-                                       tags$ol(lapply(utils::head(yrken, 3), tags$li))),
+        if (nrow(yrken) > 0) tagList(tags$div(class = "rd-label", "Vanligaste yrken"),
+                                     tags$ol(lapply(utils::head(yrken$text, 3), tags$li))),
         if (!is.null(ant) && nrow(ant) > 0)
           tags$p(class = "rd-hint",
                  actionLink(ns("antaganden_info"),
@@ -387,30 +398,35 @@ mod_prognos_server <- function(id) {
       )
     })
     # SCB gör en bedömning per yrke som utbildningsgruppen förekommer i - det
-    # kan bli över hundra yrken för en stor grupp. Fördelningen mellan
-    # "minskar/samma/ökar" varierar mycket mellan grupper (för en del grupper
-    # är "minskar" den stora kategorin, för andra "samma"), så det går inte
-    # att gissa i förväg vilken som är störst. Modalen grupperar därför yrkena
-    # per antagande och fäller bara ihop den STÖRSTA kategorin bakom en
-    # <details> - de mindre, mer informativa kategorierna syns direkt.
+    # kan bli över hundra yrken för en stor grupp. Modalen visar antagandet
+    # för de vanligaste yrkena direkt, och samlar resten (okänd storleksordning)
+    # i en enda infälld lista, grupperad per antagande-kategori för att vara
+    # lättare att skumma när man väl fäller ut den.
     observeEvent(input$antaganden_info, {
       ant <- antaganden_data()
       req(!is.null(ant), nrow(ant) > 0)
-      per_kategori <- ant |> dplyr::count(antagande) |> dplyr::arrange(dplyr::desc(n))
-      storst <- per_kategori$antagande[1]
-      avsnitt <- lapply(per_kategori$antagande, function(kat) {
-        rader <- dplyr::filter(ant, antagande == kat) |> dplyr::arrange(yrke)
-        etikett <- paste0(kat, " (", nrow(rader), " yrken)")
-        lista <- tags$ul(lapply(rader$yrke, tags$li))
-        if (identical(kat, storst)) tags$details(tags$summary(etikett), lista)
-        else tagList(tags$div(class = "rd-label", etikett), lista)
-      })
+      topp <- vanligaste_yrken_data()$yrke
+      topp_rader <- dplyr::filter(ant, yrke %in% topp) |> dplyr::arrange(match(yrke, topp))
+      ovriga <- dplyr::filter(ant, !yrke %in% topp)
+      ovriga_fold <- if (nrow(ovriga) == 0) NULL else {
+        per_kategori <- ovriga |> dplyr::count(antagande) |> dplyr::arrange(dplyr::desc(n))
+        kategorier <- lapply(per_kategori$antagande, function(kat) {
+          rader <- dplyr::filter(ovriga, antagande == kat) |> dplyr::arrange(yrke)
+          tagList(tags$div(class = "rd-label", paste0(kat, " (", nrow(rader), " yrken)")),
+                  tags$ul(lapply(rader$yrke, tags$li)))
+        })
+        tags$details(tags$summary(paste0("Övriga ", nrow(ovriga), " yrken")), kategorier)
+      }
       showModal(modalDialog(
         title = "SCB:s antaganden om utbildningsväxling", easyClose = TRUE, size = "m",
         tags$p(class = "rd-hint",
                "Antagandena gäller hur stor andel av dem som arbetar inom respektive yrke som ",
                "SCB bedömer kommer att ha den här utbildningen 2040."),
-        avsnitt
+        if (nrow(topp_rader) > 0)
+          tagList(tags$div(class = "rd-label", "Vanligaste yrken"),
+                  tags$ul(lapply(seq_len(nrow(topp_rader)), function(i)
+                    tags$li(tags$strong(topp_rader$yrke[i]), ": ", topp_rader$antagande[i])))),
+        ovriga_fold
       ))
     })
 

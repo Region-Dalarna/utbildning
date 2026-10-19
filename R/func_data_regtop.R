@@ -102,10 +102,13 @@ regtop_faktorer <- function(regionkod, kod) {
 
 # ---- Vanligaste yrken -----------------------------------------------------------------
 # Kolumnnamnen för yrket varierar mellan tabellerna - ta den som finns.
+# Returnerar yrke (rått namn, för matchning mot t.ex. antaganden_utbildningsvaxling)
+# och text (med andel/antal inom parentes, för visning) - en tibble med 0 rader om
+# yrkeskolumnen saknas.
 regtop_vanligaste_yrken <- function(regionkod, kod) {
   d <- hamta_regtop("vanligaste_yrken")
   yrke_kol <- intersect(c("yrke", "yrke_namn", "yrkesbenamning", "ssyk_namn"), names(d))[1]
-  if (is.na(yrke_kol)) return(character(0))
+  if (is.na(yrke_kol)) return(tibble::tibble(yrke = character(0), text = character(0)))
   d <- dplyr::filter(d, .data$regionkod == .env$regionkod, utbildningsgrupp_kod == kod)
   if ("rang" %in% names(d)) d <- dplyr::arrange(d, rang)
   # Andel (eller antal) inom parentes, när den finns.
@@ -114,7 +117,8 @@ regtop_vanligaste_yrken <- function(regionkod, kod) {
                      d$enhet %in% "procent" ~ paste0(" (", scales::number(d$varde, accuracy = 1), " %)"),
                      TRUE                    ~ paste0(" (", scales::number(d$varde, big.mark = " "), ")"))
   else ""
-  unique(paste0(d[[yrke_kol]], tillagg))
+  tibble::tibble(yrke = d[[yrke_kol]], text = paste0(d[[yrke_kol]], tillagg)) |>
+    dplyr::distinct(yrke, .keep_all = TRUE)
 }
 
 # ---- Perioder, kön och summering --------------------------------------------------
