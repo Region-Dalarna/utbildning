@@ -71,6 +71,7 @@ skapa_diagram_bedomning_antal <- function(d, region_namn, rubrik = NULL, kalla =
 skapa_diagram_tillgang_efterfragan <- function(d, rubrik = NULL, underrubrik = NULL,
                                                kalla = KALLA_REGTOP) {
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 6.5, 3.6))
+  har_prognos <- any(d$typ == "prognos")
   d <- d |>
     dplyr::mutate(ar = as.integer(ar),
                   serie = factor(dplyr::if_else(variabel == "tillgang", "Tillgång", "Efterfrågan"),
@@ -81,21 +82,33 @@ skapa_diagram_tillgang_efterfragan <- function(d, rubrik = NULL, underrubrik = N
     dplyr::filter(d, typ == "historik", ar == sista_hist) |> dplyr::mutate(typ = "prognos_start"),
     dplyr::filter(d, typ == "prognos"))
   d <- d |> dplyr::mutate(tooltip = paste0(serie, " ", ar, if_else_prognos(typ), ": ", .fmt_antal(varde)))
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = varde, colour = serie)) +
-    ggplot2::annotate("rect", xmin = sista_hist + 0.5, xmax = Inf, ymin = -Inf, ymax = Inf,
-                      fill = .REGTOP_PROGNOS_FYLL) +
-    ggplot2::annotate("text", x = sista_hist + 1, y = Inf, label = "Prognos", hjust = 0, vjust = 1.5,
-                      size = 2.8, colour = RD_TEXT_MUTED) +
-    ggplot2::geom_line(data = dplyr::filter(d, typ == "historik"), linewidth = 0.9) +
-    ggplot2::geom_line(data = prog, linewidth = 0.9, linetype = "22") +
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = ar, y = varde, colour = serie))
+  # Skuggningen och "Prognos"-texten ritas bara när det faktiskt finns en
+  # prognos att skugga fram till - annars blir det bara en missvisande,
+  # avklippt flisa längst till höger (axeln sträcker sig då bara till sista
+  # historiska året, se scale_x_continuous nedan).
+  if (har_prognos)
+    g <- g +
+      ggplot2::annotate("rect", xmin = sista_hist + 0.5, xmax = Inf, ymin = -Inf, ymax = Inf,
+                        fill = .REGTOP_PROGNOS_FYLL) +
+      ggplot2::annotate("text", x = sista_hist + 1, y = Inf, label = "Prognos", hjust = 0, vjust = 1.5,
+                        size = 2.8, colour = RD_TEXT_MUTED)
+  g <- g +
+    ggplot2::geom_line(data = dplyr::filter(d, typ == "historik"), linewidth = 0.9)
+  if (har_prognos) g <- g + ggplot2::geom_line(data = prog, linewidth = 0.9, linetype = "22")
+  g <- g +
     ggiraph::geom_point_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(serie, ar),
                                                  shape = typ), size = 2, fill = "white", stroke = 1) +
     ggplot2::scale_shape_manual(values = c(historik = 16, prognos = 21), guide = "none") +
     ggplot2::scale_colour_manual(values = .TILLGANG_FARGER, name = NULL) +
-    ggplot2::scale_x_continuous(breaks = seq(2010, 2040, by = 5)) +
+    ggplot2::scale_x_continuous(breaks = if (har_prognos) seq(2010, 2040, by = 5) else .ar_breaks(d$ar)) +
     ggplot2::scale_y_continuous(breaks = .heltal_skala(), labels = .fmt_antal, limits = c(0, NA)) +
     ggplot2::labs(x = NULL, y = "Antal personer", title = rubrik, subtitle = underrubrik,
-                  caption = paste0("Källa: ", kalla, "\nStreckat: prognos. Efterfrågan prognostiseras för 2030, 2035 och 2040.")) +
+                  caption = paste0("Källa: ", kalla, "\n",
+                                   if (har_prognos)
+                                     "Streckat: prognos. Efterfrågan prognostiseras för 2030, 2035 och 2040."
+                                   else
+                                     "SCB gör ingen framskrivning till 2040 för gruppen i det här länet.")) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top",
                    panel.grid.major.y = ggplot2::element_line(color = "#eef2f5"))
@@ -123,15 +136,25 @@ skapa_diagram_faktorer <- function(d, fmt, x_label, rubrik = NULL, underrubrik =
                        size = 3, colour = RD_TEXT) +
     ggplot2::scale_fill_manual(values = c(okning = "#459079", minskning = "#d9653b"), guide = "none") +
     ggplot2::scale_x_continuous(labels = fmt, expand = ggplot2::expansion(mult = 0.14)) +
-    ggplot2::labs(x = x_label, y = NULL, title = rubrik, subtitle = underrubrik,
+    ggplot2::labs(x = .radbryt(x_label), y = NULL, title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla, "\nGrönt ökar och orange minskar.")) +
     .rd_tema()
   .girafe_std(g, width_svg = 5, height_svg = max(2.6, nrow(d) * 0.4 + 1), selection = FALSE)
 }
 
 # ---- Arbetskraften per kön 2023 och 2040 ------------------------------------------
-skapa_diagram_arbetskraft_kon <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
-  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.2))
+# har_bedomning = FALSE när SCB inte gör någon framskrivning till 2040 för
+# gruppen i länet - då saknas ofta hela tabellen, inte bara 2040-värdet, och
+# platshållaren får då en tydlig förklaring i stället för "Inga data".
+skapa_diagram_arbetskraft_kon <- function(d, har_bedomning = TRUE, rubrik = NULL, underrubrik = NULL,
+                                          kalla = KALLA_REGTOP) {
+  if (nrow(d) == 0)
+    return(.girafe_std(
+      .tom_plot_rubrik(
+        if (har_bedomning) "Inga data"
+        else "SCB gör ingen framskrivning till 2040 för gruppen i det här länet.",
+        rubrik = rubrik, underrubrik = underrubrik, kalla = kalla),
+      5, 3.2))
   d <- d |> dplyr::mutate(
     ar_text = paste0(ar, if_else_prognos(typ)),
     ar_text = factor(ar_text, levels = unique(ar_text[order(ar)])),
@@ -385,8 +408,15 @@ skapa_diagram_matare <- function(d, kalla = KALLA_REGTOP) {
 # ---- Rörlighet: inflöde, utflöde och netto per period --------------------------------------
 # d: regtop_rorlighet() (flode_text, period, typ, variabel in/ut/netto, varde).
 # In uppåt, ut nedåt, netto som romb. En panel per flöde (egna skalor).
-skapa_diagram_rorlighet <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KALLA_REGTOP) {
-  if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data om flytt och pendling"), 7, 3.6))
+skapa_diagram_rorlighet <- function(d, har_bedomning = TRUE, rubrik = NULL, underrubrik = NULL,
+                                    kalla = KALLA_REGTOP) {
+  if (nrow(d) == 0)
+    return(.girafe_std(
+      .tom_plot_rubrik(
+        if (har_bedomning) "Inga data om flytt och pendling"
+        else "SCB gör ingen framskrivning till 2040 för gruppen i det här länet.",
+        rubrik = rubrik, underrubrik = underrubrik, kalla = kalla),
+      7, 3.6))
   d <- d |> dplyr::mutate(
     flode_text = factor(flode_text, levels = intersect(REGTOP_FLODE_TEXT, unique(flode_text))),
     enhet_text = dplyr::if_else(flode == "pendling", "", " per år"),

@@ -416,7 +416,8 @@ mod_prognos_server <- function(id) {
       req(grupp_vald())
       d <- dplyr::filter(hamta_regtop("arbetskraft_utbildningsgrupp"), regionkod == region(),
                          utbildningsgrupp_kod == grupp_vald())
-      skapa_diagram_arbetskraft_kon(d, rubrik = "Arbetskraften per kön", underrubrik = region_namn())
+      skapa_diagram_arbetskraft_kon(d, har_bedomning = isTRUE(grupp_rad()$har_bedomning[1]),
+                                    rubrik = "Arbetskraften per kön", underrubrik = region_namn())
     })
 
     output$d_lan <- ggiraph::renderGirafe({
@@ -460,7 +461,8 @@ mod_prognos_server <- function(id) {
     output$d_rorlighet <- ggiraph::renderGirafe({
       req(grupp_vald())
       d <- regtop_rorlighet(region(), grupp_vald())
-      skapa_diagram_rorlighet(d, rubrik = "Flytt, migration och pendling",
+      skapa_diagram_rorlighet(d, har_bedomning = isTRUE(grupp_rad()$har_bedomning[1]),
+                              rubrik = "Flytt, migration och pendling",
                               underrubrik = paste0(region_namn(), if (region() == "00")
                                 " \u00b7 för riket finns bara migration" else ""))
     })

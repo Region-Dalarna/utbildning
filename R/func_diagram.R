@@ -36,6 +36,24 @@
     ggplot2::theme_void()
 }
 
+# Platshållarplot MED rubrik/underrubrik/källa - används när ett diagram helt
+# saknar data men man ändå vill visa vilket diagram det är och varför (t.ex.
+# "SCB gör ingen framskrivning till 2040 ...") i stället för en helt tom,
+# namnlös ruta.
+.tom_plot_rubrik <- function(msg, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  ggplot2::ggplot() +
+    ggplot2::annotate("text", x = 0, y = 0, label = msg, color = RD_TEXT_MUTED, size = 3.2) +
+    ggplot2::labs(title = rubrik, subtitle = underrubrik,
+                  caption = if (!is.null(kalla)) paste0("Källa: ", kalla)) +
+    .rd_tema() +
+    ggplot2::theme(axis.text = ggplot2::element_blank(), axis.ticks = ggplot2::element_blank(),
+                   axis.title.x = ggplot2::element_blank(), panel.grid = ggplot2::element_blank())
+}
+
+# Bryter en lång axeletikett över flera rader så att den inte beskärs i de
+# smalare (half-width) diagrammen - se skapa_diagram_faktorer().
+.radbryt <- function(x, bredd = 30) paste(strwrap(x, width = bredd), collapse = "\n")
+
 # Mikrodata från SCB:s uppdrag Regionala utvecklingsdatabasen. Tabellnamnen
 # följer registrens namn i leveransens variabellista.
 KALLA_RUD <- "Regionala utvecklingsdatabasen (SCB)"
