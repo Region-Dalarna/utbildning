@@ -57,7 +57,7 @@ mod_prognos_ui <- function(id) {
         uiOutput(ns("aggregat_ui")),
         tags$hr(),
         tags$p(class = "rd-hint",
-               "Prognoserna bygger på SCB:s Regionala trender och prognoser 2025 (RegTop), ",
+               "Prognoserna bygger på SCB:s Regionala trender och prognoser 2025, ",
                "publicerad i maj 2026. De visar hur tillgång och efterfrågan på arbetskraft ",
                "med olika utbildningar kan utvecklas fram till 2040 om trenderna håller i sig - ",
                "inte vad som säkert kommer att hända."),

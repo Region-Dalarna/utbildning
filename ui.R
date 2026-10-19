@@ -86,7 +86,7 @@ shinyUI(
                   tags$strong('Källa: '),
                   'Regionala utvecklingsdatabasen (SCB), Skolverket, ',
                   'Gymnasieantagningen (Dalarnas kommunförbund) och SCB:s ',
-                  'Regionala trender och prognoser 2025 (RegTop).'),
+                  'Regionala trender och prognoser 2025.'),
               p(class = 'rd-hint',
                 'Etablering efter examen bygger på Registerbaserad aktivitetsstatistik ',
                 '(RAKS) och, från och med 2020, Befolkningens arbetsmarknadsstatus (BAS). ',
