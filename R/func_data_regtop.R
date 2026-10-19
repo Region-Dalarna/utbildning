@@ -21,7 +21,7 @@
 #  Publicerad statistik: ingen röjandekontroll (min_antal = 0).
 # ============================================================
 
-KALLA_REGTOP <- "SCB, Regionala trender och prognoser 2025 (RegTop)"
+KALLA_REGTOP <- "SCB, Regionala trender och prognoser 2025"
 
 .regtop_cache <- new.env(parent = emptyenv())
 

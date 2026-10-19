@@ -14,6 +14,21 @@
   if (length(u) <= 8) u else u[seq(1, length(u), by = 2)]
 }
 
+# Snälla heltalsbrytpunkter för antalsaxlar (elever, studerande, personer -
+# alltid heltal). ggplot2/scales pretty()-brytpunkter kan annars bli
+# decimaler när spannet är litet, t.ex. en enda mätpunkt (22.95, 22.975, ...).
+.heltal_skala <- function(n = 5) {
+  function(x) {
+    rng <- range(x, na.rm = TRUE)
+    if (diff(rng) == 0) rng <- rng + c(-2, 2)
+    steg_kandidater <- c(1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500,
+                         1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000)
+    steg <- steg_kandidater[match(TRUE, steg_kandidater >= diff(rng) / n)]
+    if (is.na(steg)) steg <- ceiling(diff(rng) / n)
+    seq(floor(rng[1] / steg) * steg, ceiling(rng[2] / steg) * steg, by = steg)
+  }
+}
+
 # Liten platshållarplot.
 .tom_plot <- function(msg = "") {
   ggplot2::ggplot() +
@@ -94,6 +109,15 @@ RD_DOLD_FYLL <- "#e1e5e8"
     )
 }
 
+# Höjd (px) för en girafe-container så att den matchar diagrammets egna
+# bredd/höjd-förhållande (width_svg/height_svg) i stället för en gissad, rund
+# pixelhöjd - annars blir det antingen tomt utrymme (container för hög) eller
+# beskuret innehåll (container för låg). kolumnbredd_px är en ungefärlig
+# bredd för kolumnen (t.ex. column(7, ...) i en sidebarLayout-huvudpanel).
+.girafe_hojd <- function(width_svg, height_svg, kolumnbredd_px) {
+  paste0(round(kolumnbredd_px * height_svg / width_svg), "px")
+}
+
 # Standardiserad girafe. selection = TRUE ger klickbar korsfiltrering.
 # Lasso är dolt; PNG-nedladdning (saveaspng) är på för alla diagram.
 .girafe_std <- function(g, width_svg = 9, height_svg = 6, selection = FALSE) {
@@ -144,7 +168,7 @@ skapa_diagram_bar <- function(df, metrik, metrik_label, ar = NULL,
       width = 0.74, linetype = "22", linewidth = 0.35) +
     ggplot2::scale_fill_identity() +
     ggplot2::scale_colour_identity() +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
+    ggplot2::scale_x_continuous(breaks = .heltal_skala(), expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
                   caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +
@@ -189,7 +213,7 @@ skapa_diagram_bar_kon <- function(df, metrik_kv, metrik_man, metrik_label, ar = 
                                breaks = c(names(KON_FARGER), if (any(d$dold)) dold_namn),
                                name = NULL) +
     ggplot2::scale_colour_identity() +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
+    ggplot2::scale_x_continuous(breaks = .heltal_skala(), expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
                   caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +
@@ -220,6 +244,7 @@ skapa_diagram_trend <- function(df, metrik, metrik_label, program_sel = NULL,
       ggplot2::aes(tooltip = tooltip, data_id = ar), color = RD_PRIMARY, size = 2.4,
       na.rm = TRUE) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala()) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik,
                   caption = .kalltext(kalla, dolda, min_antal)) +
@@ -253,6 +278,7 @@ skapa_diagram_trend_kon <- function(df, metrik_kv, metrik_man, metrik_label, pro
       ggplot2::aes(tooltip = tooltip, data_id = paste(ar, kon)), size = 2.2, na.rm = TRUE) +
     ggplot2::scale_color_manual(values = KON_FARGER, name = NULL) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala()) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik,
                   caption = .kalltext(kalla, dolda, min_antal)) +
@@ -435,7 +461,7 @@ skapa_diagram_arskurs <- function(df, ar = NULL,
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = data_id), width = 0.72) +
     ggplot2::scale_fill_manual(values = ARSKURS_FARGER, name = NULL) +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
+    ggplot2::scale_x_continuous(breaks = .heltal_skala(), expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = "Antal elever", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
@@ -466,6 +492,7 @@ skapa_diagram_trend_arskurs <- function(df, program_sel = NULL,
       ggplot2::aes(tooltip = tooltip, data_id = paste(ar, arskurs)), size = 2.2) +
     ggplot2::scale_color_manual(values = ARSKURS_FARGER, name = NULL) +
     ggplot2::scale_x_continuous(breaks = .ar_breaks(d$ar)) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala()) +
     ggplot2::labs(x = NULL, y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
@@ -770,7 +797,7 @@ skapa_diagram_bar_fordelning <- function(df, kategori_kol, metrik, farger, metri
                                breaks = c(names(farger), if (any(d$dold)) dold_namn),
                                name = NULL) +
     ggplot2::scale_colour_identity() +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.02))) +
+    ggplot2::scale_x_continuous(breaks = .heltal_skala(), expand = ggplot2::expansion(mult = c(0, 0.02))) +
     ggplot2::labs(x = metrik_label, y = NULL,
                   title = rubrik, subtitle = underrubrik,
                   caption = .kalltext(kalla, any(d$dold), min_antal, platshallare = TRUE)) +

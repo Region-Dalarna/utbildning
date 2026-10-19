@@ -20,12 +20,22 @@
 
 prognos_struktur <- list(
   bedomning       = list(label = "Bedömning 2040"),
-  kartor          = list(label = "Kartöversikt"),
   vagar           = list(label = "Vägar in i yrket"),
   rorlighet       = list(label = "Flytt och pendling"),
   gymnasiet       = list(label = "Gymnasiet"),
   eftergymnasialt = list(label = "Eftergymnasialt")
 )
+
+# Bedömning 2040: översikt (alla grupper, diagram/tabell) eller en vald grupp.
+.BEDOMNING_VISNING <- c("Alla (diagram)" = "diagram", "Alla (tabell)" = "tabell",
+                        "En utbildningsgrupp" = "grupp")
+
+# Ungefärlig kolumnbredd (px) i sidebarLayout-huvudpanelen (width = 9), för
+# att dimensionera girafe-diagrammen efter sitt eget bredd/höjd-förhållande
+# (se .girafe_hojd() i func_diagram.R) - minimerar tomt utrymme i korten.
+.PROGNOS_KOL7_PX <- 560
+.PROGNOS_KOL6_PX <- 470
+.PROGNOS_KOL5_PX <- 400
 
 # ---- UI --------------------------------------------------------------------
 mod_prognos_ui <- function(id) {
@@ -80,20 +90,44 @@ mod_prognos_server <- function(id) {
                                 options = shinyWidgets::pickerOptions(liveSearch = TRUE))
     })
     omrade <- reactive(if (is.null(input$omrade)) "bedomning" else input$omrade)
-    output$aggregat_ui <- renderUI({
-      req(omrade() %in% c("bedomning", "kartor"))
-      agg <- sort(unique(regtop_bedomning()$aggregat))
-      tagList(
-        if (omrade() == "bedomning")
-          shinyWidgets::radioGroupButtons(ns("visning"), "Visa", choices = c("Diagram" = "diagram", "Tabell" = "tabell"),
-                                          selected = isolate(if (is.null(input$visning)) "diagram" else input$visning)),
-        selectInput(ns("aggregat"), "Utbildningsgrupper",
-                    choices = c(if (omrade() == "bedomning") c("Alla" = "_alla_"), agg),
-                    selected = isolate(if (!is.null(input$aggregat) && input$aggregat %in% agg) input$aggregat)))
-    })
-
     region <- reactive(if (is.null(input$region)) "20" else input$region)
     region_namn <- reactive(names(regtop_regioner())[match(region(), regtop_regioner())])
+
+    # Alla utbildningsgrupper i valt län (oavsett aggregatfilter), för den
+    # sökbara utbildningsgruppsväljaren i "En utbildningsgrupp".
+    bedomning_alla_grupper <- reactive({
+      d <- dplyr::filter(regtop_bedomning(), regionkod == region()) |>
+        dplyr::distinct(utbildningsgrupp_kod, utbildningsgrupp) |> dplyr::arrange(utbildningsgrupp)
+      stats::setNames(d$utbildningsgrupp_kod, d$utbildningsgrupp)
+    })
+
+    output$aggregat_ui <- renderUI({
+      req(omrade() == "bedomning")
+      # Får INTE isoleras: knappen "En utbildningsgrupp" ska flippa om den
+      # här panelen direkt, både vid klick i panelen och via
+      # updateRadioGroupButtons() (t.ex. klick i översiktsdiagrammet).
+      visning_val <- if (is.null(input$visning)) "diagram" else input$visning
+      if (identical(visning_val, "grupp")) {
+        val <- bedomning_alla_grupper()
+        return(tagList(
+          shinyWidgets::radioGroupButtons(ns("visning"), "Visa", choices = .BEDOMNING_VISNING,
+                                          selected = "grupp"),
+          selectInput(ns("bedomning_grupp"), "Utbildningsgrupp (sökbar)", choices = val,
+                      selected = isolate(if (!is.null(grupp_vald()) && grupp_vald() %in% val) grupp_vald()
+                                         else unname(val[1])))))
+      }
+      agg <- sort(unique(regtop_bedomning()$aggregat))
+      tagList(
+        shinyWidgets::radioGroupButtons(ns("visning"), "Visa", choices = .BEDOMNING_VISNING,
+                                        selected = visning_val),
+        selectInput(ns("aggregat"), "Utbildningsgrupper",
+                    choices = c("Alla" = "_alla_", agg),
+                    selected = isolate(if (!is.null(input$aggregat) && input$aggregat %in% agg) input$aggregat)))
+    })
+    observeEvent(input$bedomning_grupp, {
+      req(input$bedomning_grupp)
+      grupp_vald(input$bedomning_grupp)
+    })
 
     # Bedömningen i valt län, filtrerad på aggregat.
     bedomning_region <- reactive({
@@ -107,9 +141,20 @@ mod_prognos_server <- function(id) {
     grupp_vald <- reactiveVal(NULL)
     observeEvent(input$d_bedomning_selected, {
       sel <- input$d_bedomning_selected
-      if (length(sel) == 1) grupp_vald(sel)
+      if (length(sel) == 1) {
+        grupp_vald(sel)
+        shinyWidgets::updateRadioGroupButtons(session, "visning", selected = "grupp")
+      }
     })
-    observeEvent(input$tillbaka, grupp_vald(NULL))
+    observeEvent(input$tillbaka, {
+      grupp_vald(NULL)
+      shinyWidgets::updateRadioGroupButtons(session, "visning", selected = "diagram")
+    })
+    # Detaljvyn visas antingen när väljaren står på "En utbildningsgrupp"
+    # eller när en grupp redan är vald (klick från ett annat diagram) - de
+    # kan skilja sig åt ett kort ögonblick innan input$bedomning_grupp hinner
+    # fram till servern, se aggregat_ui.
+    detaljvy <- reactive(identical(input$visning, "grupp") || !is.null(grupp_vald()))
     grupp_rad <- reactive({
       req(grupp_vald())
       dplyr::filter(regtop_bedomning(), regionkod == region(), utbildningsgrupp_kod == grupp_vald())
@@ -119,23 +164,46 @@ mod_prognos_server <- function(id) {
       if (length(n) == 0) grupp_vald() else n[1]
     })
 
+    # Faktorerna som ligger bakom tillgången resp. efterfrågan för vald grupp
+    # - delade reactives så att både layouthöjden och diagrammen använder
+    # exakt samma data (se output$vy och output$d_tillgang_faktorer/d_efterfragan).
+    tillgang_faktorer <- reactive({
+      req(grupp_vald())
+      f <- regtop_faktorer(region(), grupp_vald()) |> dplyr::filter(sida == "tillgang") |>
+        regtop_summa_period() |> dplyr::select(faktor_text, varde)
+      r <- grupp_rad()
+      start <- if (nrow(r) > 0) r$tillgang_2023[1] else NA
+      slut  <- if (nrow(r) > 0) r$tillgang_2040[1] else NA
+      if (is.na(start) || is.na(slut)) return(f)
+      # Avrundning ger ofta någon enstaka person - bara märkbara skillnader
+      # (minst 1 % av tillgången 2023) får en egen stapel.
+      rest <- slut - start - sum(f$varde, na.rm = TRUE)
+      if (abs(rest) >= max(1, 0.01 * abs(start)))
+        f <- dplyr::bind_rows(f, tibble::tibble(faktor_text = "Övrigt och avrundning", varde = rest))
+      f
+    })
+    efterfragan_faktorer <- reactive({
+      req(grupp_vald())
+      regtop_faktorer(region(), grupp_vald()) |> dplyr::filter(sida == "efterfragan") |>
+        dplyr::select(faktor_text, varde)
+    })
+
     output$brodsmula <- renderText({
       if (omrade() != "bedomning")
-        return(paste0("Prognos 2040 \u203a ", prognos_struktur[[omrade()]]$label,
-                      if (!is.null(kategori_vald())) paste0(" \u203a ", kategori_vald())))
-      paste0("Prognos 2040 \u203a Bedömning 2040",
-             if (!is.null(grupp_vald())) paste0(" \u203a ", grupp_namn()))
+        return(paste0("Prognos 2040 › ", prognos_struktur[[omrade()]]$label,
+                      if (!is.null(kategori_vald())) paste0(" › ", kategori_vald())))
+      paste0("Prognos 2040 › Bedömning 2040",
+             if (detaljvy() && !is.null(grupp_vald())) paste0(" › ", grupp_namn()))
     })
 
     output$vy <- renderUI({
       if (omrade() == "vagar") return(vy_vagar())
       if (omrade() %in% c("gymnasiet", "eftergymnasialt")) return(vy_period())
-      if (omrade() == "kartor") return(vy_kartor())
       if (omrade() == "rorlighet") return(vy_rorlighet())
-      if (is.null(grupp_vald()) && identical(input$visning, "tabell"))
+      if (!detaljvy() && identical(input$visning, "tabell"))
         return(tagList(uiOutput(ns("tabell")),
                        tags$p(class = "rd-hint", "Klicka på en rad för att se vad som ligger bakom bedömningen.")))
-      if (is.null(grupp_vald())) {
+      if (!detaljvy()) {
         utan <- dplyr::filter(bedomning_region(), !har_bedomning)$utbildningsgrupp
         # Höjden följer antalet grupper (samma proportioner som diagrammet).
         n <- sum(bedomning_region()$har_bedomning)
@@ -152,37 +220,58 @@ mod_prognos_server <- function(id) {
                  div(class = "rd-subcard", .regtop_lasanvisning()))
         ))
       }
+      # Höjderna räknas ut från varje diagrams eget bredd/höjd-förhållande så
+      # att korten inte får onödigt tomt utrymme (se .girafe_hojd(), func_diagram.R).
+      # grupp_vald() kan vara NULL ett kort ögonblick (se detaljvy() ovan) -
+      # utbildningsgrupp_kod == NULL ger ett tomt urval, inte ett fel.
+      n_lan <- if (is.null(grupp_vald())) 0 else
+        nrow(dplyr::filter(regtop_bedomning(), utbildningsgrupp_kod == grupp_vald(),
+                           regionkod != "00", har_bedomning))
       tagList(
-        actionLink(ns("tillbaka"), "← Alla utbildningsgrupper", class = "rd-tillbaka"),
-        tags$h3(class = "rd-rubrik-grupp", grupp_namn(), tags$small(paste0(" · ", region_namn()))),
+        if (!is.null(grupp_vald()))
+          tagList(actionLink(ns("tillbaka"), "← Alla utbildningsgrupper", class = "rd-tillbaka"),
+                  tags$h3(class = "rd-rubrik-grupp", grupp_namn(), tags$small(paste0(" · ", region_namn())))),
         fluidRow(
-          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_tillgang"), height = "360px"))),
+          column(7, div(class = "rd-subcard",
+                        ggiraph::girafeOutput(ns("d_tillgang"),
+                                              height = .girafe_hojd(6.5, 3.6, .PROGNOS_KOL7_PX)))),
           column(5, div(class = "rd-subcard",
-                        ggiraph::girafeOutput(ns("d_matare"), height = "190px"),
+                        ggiraph::girafeOutput(ns("d_matare"), height = .girafe_hojd(5, 2.3, .PROGNOS_KOL5_PX)),
                         uiOutput(ns("faktaruta"))))
         ),
         fluidRow(
-          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_vattenfall"), height = "360px"))),
-          column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_efterfragan"), height = "330px")))
+          column(6, div(class = "rd-subcard",
+                        ggiraph::girafeOutput(
+                          ns("d_tillgang_faktorer"),
+                          height = .girafe_hojd(5, max(2.6, nrow(tillgang_faktorer()) * 0.4 + 1),
+                                               .PROGNOS_KOL6_PX)))),
+          column(6, div(class = "rd-subcard",
+                        ggiraph::girafeOutput(
+                          ns("d_efterfragan"),
+                          height = .girafe_hojd(5, max(2.6, nrow(efterfragan_faktorer()) * 0.4 + 1),
+                                               .PROGNOS_KOL6_PX))))
         ),
         fluidRow(
-          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_lan"), height = "520px"))),
+          column(7, div(class = "rd-subcard",
+                        ggiraph::girafeOutput(ns("d_lan"),
+                                              height = .girafe_hojd(5, max(3.5, n_lan * 0.2 + 1.6),
+                                                                    .PROGNOS_KOL7_PX)))),
           column(5, div(class = "rd-subcard",
                         div(class = "rd-kon-kontroll",
                             shinyWidgets::radioGroupButtons(
                               ns("karta_klasser"), label = NULL, size = "sm",
                               choices = c("Tre klasser" = "3", "Sju klasser" = "7"),
                               selected = isolate(if (is.null(input$karta_klasser)) "3" else input$karta_klasser))),
-                        ggiraph::girafeOutput(ns("d_karta"), height = "520px"),
+                        ggiraph::girafeOutput(ns("d_karta"), height = .girafe_hojd(4.6, 6, .PROGNOS_KOL5_PX)),
                         tags$p(class = "rd-hint",
                                "Tre klasser som i SCB:s rapport (viss brist, brist och stor brist = brist). ",
                                "Klicka på ett län för att byta län.")))
         ),
         fluidRow(
-          column(12, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_rorlighet"), height = "380px")))
-        ),
-        fluidRow(
-          column(7, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_kon"), height = "330px")))
+          column(7, div(class = "rd-subcard",
+                        ggiraph::girafeOutput(ns("d_rorlighet"), height = .girafe_hojd(8, 3.6, .PROGNOS_KOL7_PX)))),
+          column(5, div(class = "rd-subcard",
+                        ggiraph::girafeOutput(ns("d_kon"), height = .girafe_hojd(5, 3.2, .PROGNOS_KOL5_PX))))
         )
       )
     })
@@ -222,7 +311,10 @@ mod_prognos_server <- function(id) {
                  tags$thead(tags$tr(tags$th("Utbildningsgrupp"), lapply(kol_namn, tags$th))),
                  tags$tbody(rader))
     })
-    observeEvent(input$tabell_grupp, grupp_vald(input$tabell_grupp))
+    observeEvent(input$tabell_grupp, {
+      grupp_vald(input$tabell_grupp)
+      shinyWidgets::updateRadioGroupButtons(session, "visning", selected = "grupp")
+    })
 
     # ---- Översikt -------------------------------------------------------------
     output$d_bedomning <- ggiraph::renderGirafe({
@@ -251,6 +343,18 @@ mod_prognos_server <- function(id) {
                                          underrubrik = paste0(region_namn(), " · 2010–2040"))
     })
 
+    # SCB:s antaganden om utbildningsväxling tar en del plats (ofta en lista
+    # med flera yrken), så de ligger i en modal bakom en info-länk i stället
+    # för inline i faktarutan (se observeEvent(input$antaganden_info) nedan).
+    antaganden_data <- reactive({
+      req(grupp_vald())
+      tryCatch(
+        hamta_regtop("antaganden_utbildningsvaxling") |>
+          dplyr::filter(utbildningsgrupp_kod == grupp_vald()) |>
+          dplyr::distinct(yrke, antagande),
+        error = function(e) NULL)
+    })
+
     output$faktaruta <- renderUI({
       r <- grupp_rad()
       if (nrow(r) == 0) return(tags$p(class = "rd-hint", "Gruppen saknas för valt län."))
@@ -271,47 +375,52 @@ mod_prognos_server <- function(id) {
                         .fmt_antal(r$efterfragan_2040), " (2040)")))
       } else tags$p(class = "rd-hint", "SCB gör ingen framskrivning till 2040 för gruppen i det här länet.")
       yrken <- tryCatch(regtop_vanligaste_yrken(region(), grupp_vald()), error = function(e) character(0))
-      ant <- tryCatch(
-        hamta_regtop("antaganden_utbildningsvaxling") |>
-          dplyr::filter(utbildningsgrupp_kod == grupp_vald()) |>
-          dplyr::distinct(yrke, antagande),
-        error = function(e) NULL)
+      ant <- antaganden_data()
       tagList(
         bed,
         if (length(yrken) > 0) tagList(tags$div(class = "rd-label", "Vanligaste yrken"),
                                        tags$ol(lapply(utils::head(yrken, 3), tags$li))),
         if (!is.null(ant) && nrow(ant) > 0)
-          tagList(tags$div(class = "rd-label", "SCB:s antaganden om utbildningsväxling"),
-                  tags$ul(class = "rd-hint",
-                          lapply(seq_len(min(nrow(ant), 5)), function(i)
-                            tags$li(tags$strong(ant$yrke[i]), ": ", ant$antagande[i]))))
+          tags$p(class = "rd-hint",
+                 actionLink(ns("antaganden_info"),
+                            label = tagList(HTML("&#x24D8; "), "SCB:s antaganden om utbildningsväxling")))
       )
     })
+    observeEvent(input$antaganden_info, {
+      ant <- antaganden_data()
+      req(!is.null(ant), nrow(ant) > 0)
+      showModal(modalDialog(
+        title = "SCB:s antaganden om utbildningsväxling", easyClose = TRUE, size = "m",
+        tags$p(class = "rd-hint",
+               "Antagandena gäller hur stor andel av dem som arbetar inom respektive yrke som ",
+               "SCB bedömer kommer att ha den här utbildningen 2040."),
+        tags$ul(lapply(seq_len(nrow(ant)), function(i)
+          tags$li(tags$strong(ant$yrke[i]), ": ", ant$antagande[i])))
+      ))
+    })
 
-    output$d_vattenfall <- ggiraph::renderGirafe({
-      r <- grupp_rad()
-      f <- regtop_faktorer(region(), grupp_vald()) |>
-        dplyr::filter(sida == "tillgang") |>
-        regtop_summa_period()
-      skapa_diagram_vattenfall(
-        if (nrow(r) > 0) r$tillgang_2023[1] else NA, f, if (nrow(r) > 0) r$tillgang_2040[1] else NA,
+    output$d_tillgang_faktorer <- ggiraph::renderGirafe({
+      skapa_diagram_faktorer(
+        tillgang_faktorer(), fmt = .fmt_antal, x_label = "Förändring 2024–2040, antal personer",
         rubrik = "Vad förändrar tillgången till 2040?",
         underrubrik = paste0(region_namn(), " · summa för 2024–2040"))
     })
 
     output$d_efterfragan <- ggiraph::renderGirafe({
-      f <- regtop_faktorer(region(), grupp_vald()) |> dplyr::filter(sida == "efterfragan")
-      skapa_diagram_efterfragan_faktorer(f, rubrik = "Vad förändrar efterfrågan?",
-                                         underrubrik = region_namn())
+      skapa_diagram_faktorer(
+        efterfragan_faktorer(), fmt = .fmt_proc, x_label = "Påverkan på efterfrågan 2023–2040",
+        rubrik = "Vad förändrar efterfrågan?", underrubrik = region_namn())
     })
 
     output$d_kon <- ggiraph::renderGirafe({
+      req(grupp_vald())
       d <- dplyr::filter(hamta_regtop("arbetskraft_utbildningsgrupp"), regionkod == region(),
                          utbildningsgrupp_kod == grupp_vald())
       skapa_diagram_arbetskraft_kon(d, rubrik = "Arbetskraften per kön", underrubrik = region_namn())
     })
 
     output$d_lan <- ggiraph::renderGirafe({
+      req(grupp_vald())
       d <- dplyr::filter(regtop_bedomning(), utbildningsgrupp_kod == grupp_vald())
       skapa_diagram_bedomning_lan(d, region(), rubrik = "Samma utbildningsgrupp i alla län",
                                   underrubrik = "Balanstal och bedömning 2040")
@@ -319,6 +428,7 @@ mod_prognos_server <- function(id) {
 
     # Karta: bedömningen för gruppen i alla län. Klick byter län.
     output$d_karta <- ggiraph::renderGirafe({
+      req(grupp_vald())
       geo <- hamta_lan_geometri()
       validate(need(!is.null(geo), paste0("Kartan kunde inte läsas",
                                           if (!is.null(.geo_cache$fel_lan)) paste0(": ", .geo_cache$fel_lan) else ".")))
@@ -412,38 +522,7 @@ mod_prognos_server <- function(id) {
       if (length(sel) != 1) return()
       grupp_vald(sel)
       shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = "bedomning")
-    })
-
-    # ---- Kartöversikt -------------------------------------------------------------
-    # Alla utbildningsgrupper inom valt område som små kartor (tre klasser).
-    # Klick på en karta öppnar gruppens fördjupning i Bedömning 2040.
-    kartor_data <- reactive({
-      agg <- sort(unique(regtop_bedomning()$aggregat))
-      a <- if (is.null(input$aggregat) || !input$aggregat %in% agg) agg[1] else input$aggregat
-      dplyr::filter(regtop_bedomning(), aggregat == a)
-    })
-    vy_kartor <- function() {
-      n <- dplyr::n_distinct(kartor_data()$utbildningsgrupp_kod)
-      tagList(
-        ggiraph::girafeOutput(ns("d_kartor"), height = paste0(max(400, ceiling(n / 4) * 330 + 120), "px")),
-        tags$p(class = "rd-hint",
-               "Tre klasser som i SCB:s rapport: viss brist, brist och stor brist visas som brist, ",
-               "visst överskott, överskott och stort överskott som överskott. Valt län har svart kant. ",
-               "Klicka på en karta för att se utbildningsgruppen i valt län."))
-    }
-    output$d_kartor <- ggiraph::renderGirafe({
-      req(omrade() == "kartor")
-      geo <- hamta_lan_geometri()
-      validate(need(!is.null(geo), paste0("Kartan kunde inte läsas",
-                                          if (!is.null(.geo_cache$fel_lan)) paste0(": ", .geo_cache$fel_lan) else ".")))
-      d <- kartor_data()
-      skapa_karta_oversikt(geo, d, region(), rubrik = paste0("Arbetsmarknadsläget 2040 \u2013 ", d$aggregat[1]))
-    })
-    observeEvent(input$d_kartor_selected, {
-      sel <- input$d_kartor_selected
-      if (length(sel) != 1) return()
-      grupp_vald(sub("\\|.*$", "", sel))
-      shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = "bedomning")
+      shinyWidgets::updateRadioGroupButtons(session, "visning", selected = "grupp")
     })
 
     # ---- Vägar in i yrket ---------------------------------------------------------
@@ -454,9 +533,12 @@ mod_prognos_server <- function(id) {
         dplyr::distinct(utbildningsgrupp_kod, utbildningsgrupp) |> dplyr::arrange(utbildningsgrupp)
       stats::setNames(d$utbildningsgrupp_kod, d$utbildningsgrupp)
     })
+    # Ingen grupp vald sedan tidigare: slumpa vilken som visas, så att det
+    # inte alltid är samma (alfabetiskt första) grupp som möter besökaren.
     vagar_grupp <- reactive({
       g <- input$vagar_grupp
-      if (is.null(g) || !g %in% vagar_grupper()) unname(vagar_grupper()[1]) else g
+      if (!is.null(g) && g %in% vagar_grupper()) return(g)
+      unname(sample(vagar_grupper(), 1))
     })
     vagar_data <- function(regionkoder) {
       dplyr::filter(hamta_regtop("examination_utbildningsform"), regionkod %in% regionkoder,

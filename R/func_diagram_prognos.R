@@ -93,7 +93,7 @@ skapa_diagram_tillgang_efterfragan <- function(d, rubrik = NULL, underrubrik = N
     ggplot2::scale_shape_manual(values = c(historik = 16, prognos = 21), guide = "none") +
     ggplot2::scale_colour_manual(values = .TILLGANG_FARGER, name = NULL) +
     ggplot2::scale_x_continuous(breaks = seq(2010, 2040, by = 5)) +
-    ggplot2::scale_y_continuous(labels = .fmt_antal, limits = c(0, NA)) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala(), labels = .fmt_antal, limits = c(0, NA)) +
     ggplot2::labs(x = NULL, y = "Antal personer", title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla, "\nStreckat: prognos. Efterfrågan prognostiseras för 2030, 2035 och 2040.")) +
     .rd_tema() +
@@ -103,61 +103,30 @@ skapa_diagram_tillgang_efterfragan <- function(d, rubrik = NULL, underrubrik = N
 }
 if_else_prognos <- function(typ) ifelse(typ == "prognos", " (prognos)", "")
 
-# ---- Vattenfall: tillgång 2023 -> faktorer -> tillgång 2040 ----------------------
-# faktorer: tillgångsfaktorerna (faktor_text, varde) som summa för perioden.
-# Skiljer summan sig från tillgång 2040 (avrundning, eller faktorer som saknas)
-# visas skillnaden som en egen stapel, så att diagrammet alltid går ihop.
-skapa_diagram_vattenfall <- function(start, faktorer, slut, rubrik = NULL, underrubrik = NULL,
-                                     kalla = KALLA_REGTOP) {
-  if (is.na(start) || is.na(slut) || nrow(faktorer) == 0)
-    return(.girafe_std(.tom_plot("Ingen framskrivning för gruppen"), 6.5, 3.6))
-  steg <- dplyr::select(faktorer, namn = faktor_text, varde)
-  # Avrundning ger ofta någon enstaka person - bara märkbara skillnader
-  # (minst 1 % av tillgången 2023) får en egen stapel.
-  rest <- slut - start - sum(steg$varde, na.rm = TRUE)
-  if (abs(rest) >= max(1, 0.01 * abs(start))) steg <- dplyr::bind_rows(steg, tibble::tibble(namn = "Övrigt och avrundning", varde = rest))
-  d <- dplyr::bind_rows(
-    tibble::tibble(namn = "Tillgång 2023", varde = start, typ = "total", fran = 0, till = start),
-    steg |> dplyr::mutate(typ = dplyr::if_else(varde >= 0, "okning", "minskning"),
-                          till = start + cumsum(varde), fran = till - varde),
-    tibble::tibble(namn = "Tillgång 2040", varde = slut, typ = "total", fran = 0, till = slut)) |>
-    dplyr::mutate(
-      pos = rev(seq_len(dplyr::n())),
-      tooltip = paste0("<b>", namn, "</b><br/>",
-                       dplyr::if_else(typ == "total", .fmt_antal(varde),
-                                      paste0(dplyr::if_else(varde >= 0, "+", ""), .fmt_antal(varde),
-                                             " under 2024–2040"))))
-  farger <- c(total = RD_PRIMARY, okning = "#459079", minskning = "#d9653b")
-  g <- ggplot2::ggplot(d) +
-    ggiraph::geom_rect_interactive(
-      ggplot2::aes(xmin = pmin(fran, till), xmax = pmax(fran, till), ymin = pos - 0.38, ymax = pos + 0.38,
-                   fill = typ, tooltip = tooltip, data_id = namn)) +
-    ggplot2::scale_fill_manual(values = farger, guide = "none") +
-    ggplot2::scale_y_continuous(breaks = d$pos, labels = d$namn) +
-    ggplot2::scale_x_continuous(labels = .fmt_antal) +
-    ggplot2::labs(x = "Antal personer", y = NULL, title = rubrik, subtitle = underrubrik,
-                  caption = paste0("Källa: ", kalla, "\nGrönt ökar och orange minskar tillgången.")) +
-    .rd_tema()
-  .girafe_std(g, width_svg = 6.5, height_svg = 3.6, selection = FALSE)
-}
-
-# ---- Efterfrågefaktorer (procent) -------------------------------------------------
-skapa_diagram_efterfragan_faktorer <- function(d, rubrik = NULL, underrubrik = NULL,
-                                               kalla = KALLA_REGTOP) {
+# ---- Faktorer som förändrar tillgång eller efterfrågan --------------------------
+# d: faktor_text, varde. Liggande staplar FRÅN NOLL (inte vattenfall/kumulativt
+# - svårt att läsa av hur mycket varje stapel är värd utan att hovra), färgade
+# efter riktning. Värdet skrivs också ut direkt vid stapeln.
+# fmt: .fmt_antal (tillgång, antal personer) eller .fmt_proc (efterfrågan, procent).
+skapa_diagram_faktorer <- function(d, fmt, x_label, rubrik = NULL, underrubrik = NULL,
+                                   kalla = KALLA_REGTOP) {
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.2))
   d <- d |> dplyr::mutate(
     faktor_text = forcats::fct_rev(factor(faktor_text, levels = unique(faktor_text))),
-    tooltip = paste0("<b>", faktor_text, "</b><br/>", dplyr::if_else(varde >= 0, "+", ""), .fmt_proc(varde)),
+    etikett = paste0(dplyr::if_else(varde >= 0, "+", ""), fmt(varde)),
+    tooltip = paste0("<b>", faktor_text, "</b><br/>", etikett),
     riktning = dplyr::if_else(varde >= 0, "okning", "minskning"))
   g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = faktor_text, fill = riktning)) +
     ggplot2::geom_vline(xintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
     ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = faktor_text), width = 0.6) +
+    ggplot2::geom_text(ggplot2::aes(label = etikett, hjust = dplyr::if_else(varde >= 0, -0.15, 1.15)),
+                       size = 3, colour = RD_TEXT) +
     ggplot2::scale_fill_manual(values = c(okning = "#459079", minskning = "#d9653b"), guide = "none") +
-    ggplot2::scale_x_continuous(labels = function(x) paste0(x, " %")) +
-    ggplot2::labs(x = "Påverkan på efterfrågan 2023–2040", y = NULL, title = rubrik,
-                  subtitle = underrubrik, caption = paste0("Källa: ", kalla)) +
+    ggplot2::scale_x_continuous(labels = fmt, expand = ggplot2::expansion(mult = 0.14)) +
+    ggplot2::labs(x = x_label, y = NULL, title = rubrik, subtitle = underrubrik,
+                  caption = paste0("Källa: ", kalla, "\nGrönt ökar och orange minskar.")) +
     .rd_tema()
-  .girafe_std(g, width_svg = 5, height_svg = 3.2, selection = FALSE)
+  .girafe_std(g, width_svg = 5, height_svg = max(2.6, nrow(d) * 0.4 + 1), selection = FALSE)
 }
 
 # ---- Arbetskraften per kön 2023 och 2040 ------------------------------------------
@@ -172,7 +141,7 @@ skapa_diagram_arbetskraft_kon <- function(d, rubrik = NULL, underrubrik = NULL, 
     ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(kon, ar)),
                                   position = ggplot2::position_dodge(width = 0.8), width = 0.75) +
     ggplot2::scale_fill_manual(values = KON_FARGER, name = NULL) +
-    ggplot2::scale_y_continuous(labels = .fmt_antal) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala(), labels = .fmt_antal) +
     ggplot2::labs(x = NULL, y = "Antal i arbetskraften", title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla)) +
     .rd_tema() +
@@ -297,7 +266,7 @@ skapa_diagram_prognos_tid <- function(d, y_label = "Antal per år", rubrik = NUL
     ggplot2::scale_colour_manual(values = farger, name = NULL,
                                  guide = if (length(farger) > 1) "legend" else "none") +
     ggplot2::scale_x_continuous(breaks = seq(5 * floor(min(alla_ar) / 5), max(alla_ar), by = 5)) +
-    ggplot2::scale_y_continuous(labels = .fmt_antal, limits = c(0, NA)) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala(), labels = .fmt_antal, limits = c(0, NA)) +
     ggplot2::labs(x = NULL, y = y_label, title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla, "\nPrognosperioderna visas som årligt genomsnitt (streckat).")) +
     .rd_tema() +
@@ -351,7 +320,7 @@ skapa_diagram_vagar <- function(d, rubrik = NULL, underrubrik = NULL, kalla = KA
     ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = paste(period, form)), width = 0.6) +
     ggplot2::scale_fill_manual(values = REGTOP_UTBFORM_FARGER, name = NULL,
                                breaks = intersect(names(REGTOP_UTBFORM_FARGER), as.character(d$form))) +
-    ggplot2::scale_y_continuous(labels = .fmt_antal) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala(), labels = .fmt_antal) +
     ggplot2::labs(x = "Prognosperiod", y = "Examinerade per år", title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla)) +
     .rd_tema() +
@@ -413,40 +382,6 @@ skapa_diagram_matare <- function(d, kalla = KALLA_REGTOP) {
   .girafe_std(g, width_svg = 5, height_svg = 2.3, selection = FALSE)
 }
 
-# ---- Kartöversikt: en liten karta per utbildningsgrupp (tre klasser) -------------------
-# geo: länens geometri, d: bedömningen för gruppernas alla län. Valt län
-# markeras med svart kant. Klick ger "utbildningsgrupp_kod|regionkod".
-skapa_karta_oversikt <- function(geo, d, vald_regionkod = NULL, rubrik = NULL, kalla = KALLA_REGTOP,
-                                 ncol = 4) {
-  d <- dplyr::filter(d, regionkod != "00") |>
-    dplyr::transmute(utbildningsgrupp_kod, utbildningsgrupp, regionkod, region,
-                     bedomning = as.character(bedomning_2040),
-                     klass = dplyr::if_else(har_bedomning, regtop_klass3(bedomning_2040), "Prognos saknas"))
-  k <- dplyr::inner_join(geo, d, by = "regionkod", relationship = "one-to-many") |>
-    dplyr::mutate(
-      klass = factor(dplyr::coalesce(klass, "Prognos saknas"), levels = c(REGTOP_KLASS3, "Prognos saknas")),
-      grupp = factor(utbildningsgrupp, levels = sort(unique(utbildningsgrupp))),
-      vald  = regionkod %in% vald_regionkod,
-      tooltip = paste0("<b>", utbildningsgrupp, "</b><br/>", region, ": ", dplyr::coalesce(bedomning, "Prognos saknas")))
-  if (nrow(k) == 0) return(.girafe_std(.tom_plot("Ingen karta"), 6, 4))
-  farger <- c(KLASS3_FARGER, "Prognos saknas" = REGTOP_SAKNAS_FARG)
-  n <- dplyr::n_distinct(k$grupp)
-  g <- ggplot2::ggplot(k) +
-    ggiraph::geom_sf_interactive(ggplot2::aes(fill = klass, tooltip = tooltip,
-                                              data_id = paste(utbildningsgrupp_kod, regionkod, sep = "|")),
-                                 colour = "white", linewidth = 0.1) +
-    ggplot2::geom_sf(data = dplyr::filter(k, vald), fill = NA, colour = RD_TEXT, linewidth = 0.4) +
-    ggplot2::facet_wrap(~grupp, ncol = ncol, labeller = ggplot2::label_wrap_gen(28)) +
-    ggplot2::scale_fill_manual(values = farger, name = NULL, drop = FALSE) +
-    ggplot2::labs(title = rubrik, caption = paste0("Källa: ", kalla)) +
-    ggplot2::theme_void() +
-    ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", size = 12),
-                   plot.caption = ggplot2::element_text(size = 7, colour = RD_TEXT_MUTED, hjust = 0),
-                   strip.text = ggplot2::element_text(size = 8, face = "bold", margin = ggplot2::margin(b = 3)),
-                   legend.position = "top")
-  .girafe_std(g, width_svg = 9, height_svg = ceiling(n / ncol) * 3.2 + 1, selection = TRUE)
-}
-
 # ---- Rörlighet: inflöde, utflöde och netto per period --------------------------------------
 # d: regtop_rorlighet() (flode_text, period, typ, variabel in/ut/netto, varde).
 # In uppåt, ut nedåt, netto som romb. En panel per flöde (egna skalor).
@@ -471,7 +406,7 @@ skapa_diagram_rorlighet <- function(d, rubrik = NULL, underrubrik = NULL, kalla 
     ggplot2::facet_wrap(~flode_text, scales = "free", nrow = 1) +
     ggplot2::scale_fill_manual(values = c(`in` = "#459079", ut = "#d9653b"),
                                labels = c(`in` = "Inflöde", ut = "Utflöde"), name = NULL) +
-    ggplot2::scale_y_continuous(labels = .fmt_antal) +
+    ggplot2::scale_y_continuous(breaks = .heltal_skala(), labels = .fmt_antal) +
     ggplot2::labs(x = NULL, y = NULL, title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla, "\nRomb = netto. Flytt och migration: per år under perioden; ",
                                    "pendling: antal personer 2023 och 2040 (prognos).")) +
