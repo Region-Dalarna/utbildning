@@ -126,19 +126,21 @@ skapa_diagram_faktorer <- function(d, fmt, x_label, rubrik = NULL, underrubrik =
   if (nrow(d) == 0) return(.girafe_std(.tom_plot("Inga data"), 5, 3.2))
   d <- d |> dplyr::mutate(
     faktor_text = forcats::fct_rev(factor(faktor_text, levels = unique(faktor_text))),
-    etikett = paste0(dplyr::if_else(varde >= 0, "+", ""), fmt(varde)),
-    tooltip = paste0("<b>", faktor_text, "</b><br/>", etikett),
+    tooltip = paste0("<b>", faktor_text, "</b><br/>",
+                     dplyr::if_else(varde >= 0, "+", ""), fmt(varde)),
     riktning = dplyr::if_else(varde >= 0, "okning", "minskning"))
+  # Värdet visas bara i tooltipen (ingen utskriven dataetikett på stapeln) -
+  # håller diagrammet rent och undviker att etiketten klipps/krockar med
+  # stapeln i de smala halvbredds-korten.
   g <- ggplot2::ggplot(d, ggplot2::aes(x = varde, y = faktor_text, fill = riktning)) +
     ggplot2::geom_vline(xintercept = 0, colour = RD_TEXT_MUTED, linewidth = 0.4) +
     ggiraph::geom_col_interactive(ggplot2::aes(tooltip = tooltip, data_id = faktor_text), width = 0.6) +
-    ggplot2::geom_text(ggplot2::aes(label = etikett, hjust = dplyr::if_else(varde >= 0, -0.15, 1.15)),
-                       size = 3, colour = RD_TEXT) +
     ggplot2::scale_fill_manual(values = c(okning = "#459079", minskning = "#d9653b"), guide = "none") +
-    ggplot2::scale_x_continuous(labels = fmt, expand = ggplot2::expansion(mult = 0.14)) +
+    ggplot2::scale_x_continuous(labels = fmt, expand = ggplot2::expansion(mult = 0.08)) +
     ggplot2::labs(x = .radbryt(x_label), y = NULL, title = rubrik, subtitle = underrubrik,
                   caption = paste0("Källa: ", kalla, "\nGrönt ökar och orange minskar.")) +
-    .rd_tema()
+    .rd_tema() +
+    ggplot2::theme(axis.text.y = ggplot2::element_text(size = 8))
   .girafe_std(g, width_svg = 5, height_svg = max(2.6, nrow(d) * 0.4 + 1), selection = FALSE)
 }
 
