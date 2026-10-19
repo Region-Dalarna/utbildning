@@ -387,30 +387,30 @@ mod_prognos_server <- function(id) {
       )
     })
     # SCB gör en bedömning per yrke som utbildningsgruppen förekommer i - det
-    # kan bli över hundra yrken för en stor grupp, men de allra flesta är
-    # "oförändrad andel" (ingen förändring antas). Modalen listar bara de yrken
-    # där SCB faktiskt antar en förändring, och nämner resten som en summa.
-    .ANTAGANDE_OFORANDRAT <- "Utbildningsgruppens andel samma som i dag"
+    # kan bli över hundra yrken för en stor grupp. Fördelningen mellan
+    # "minskar/samma/ökar" varierar mycket mellan grupper (för en del grupper
+    # är "minskar" den stora kategorin, för andra "samma"), så det går inte
+    # att gissa i förväg vilken som är störst. Modalen grupperar därför yrkena
+    # per antagande och fäller bara ihop den STÖRSTA kategorin bakom en
+    # <details> - de mindre, mer informativa kategorierna syns direkt.
     observeEvent(input$antaganden_info, {
       ant <- antaganden_data()
       req(!is.null(ant), nrow(ant) > 0)
-      forandras <- dplyr::filter(ant, antagande != .ANTAGANDE_OFORANDRAT) |> dplyr::arrange(yrke)
-      n_oforandrat <- nrow(ant) - nrow(forandras)
+      per_kategori <- ant |> dplyr::count(antagande) |> dplyr::arrange(dplyr::desc(n))
+      storst <- per_kategori$antagande[1]
+      avsnitt <- lapply(per_kategori$antagande, function(kat) {
+        rader <- dplyr::filter(ant, antagande == kat) |> dplyr::arrange(yrke)
+        etikett <- paste0(kat, " (", nrow(rader), " yrken)")
+        lista <- tags$ul(lapply(rader$yrke, tags$li))
+        if (identical(kat, storst)) tags$details(tags$summary(etikett), lista)
+        else tagList(tags$div(class = "rd-label", etikett), lista)
+      })
       showModal(modalDialog(
         title = "SCB:s antaganden om utbildningsväxling", easyClose = TRUE, size = "m",
         tags$p(class = "rd-hint",
                "Antagandena gäller hur stor andel av dem som arbetar inom respektive yrke som ",
-               "SCB bedömer kommer att ha den här utbildningen 2040. Här visas bara yrken där SCB ",
-               "antar en förändring av andelen - inte de där andelen antas vara oförändrad."),
-        if (nrow(forandras) > 0)
-          tags$ul(lapply(seq_len(nrow(forandras)), function(i)
-            tags$li(tags$strong(forandras$yrke[i]), ": ", forandras$antagande[i])))
-        else
-          tags$p(class = "rd-hint", "SCB antar ingen förändring av andelen för något yrke."),
-        if (n_oforandrat > 0)
-          tags$p(class = "rd-hint",
-                 paste0("Dessutom antas andelen vara oförändrad för ytterligare ", n_oforandrat,
-                        if (n_oforandrat == 1) " yrke." else " yrken."))
+               "SCB bedömer kommer att ha den här utbildningen 2040."),
+        avsnitt
       ))
     })
 
