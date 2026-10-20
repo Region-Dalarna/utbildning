@@ -899,7 +899,9 @@ mod_gymnasiet_server <- function(id) {
                  uiOutput(ns("bar_hint")),
                  uiOutput(ns("kon_kontroll"))),
           column(5,
-                 div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "250px")),
+                 div(class = "rd-subcard",
+                     ggiraph::girafeOutput(ns("d_trend"), height = "250px"),
+                     uiOutput(ns("intro_kontroll"))),
                  div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_programtyp"), height = "300px")))
         )
       } else if (valt_vy() == "genomstromning") {
@@ -933,6 +935,21 @@ mod_gymnasiet_server <- function(id) {
           choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
           selected = "kon", size = "sm"
         )
+      )
+    })
+
+    # Introduktionsprogrammen räknas som standard inte med i totalen för
+    # "Antal elever" (utvecklingen över tid), så den matchar Skolverkets
+    # egen "Nationella program"-summa. Kryssrutan låter användaren slå på
+    # dem. Visas bara för totalvyn (inget program valt) av just den
+    # indikatorn - för andra indikatorer/vyer är frågan inte relevant.
+    output$intro_kontroll <- renderUI({
+      ind <- valt_indikator()
+      if (valt_vy() != "dashboard" || !identical(ind$metrik, "antal_elever") ||
+          !is.null(program_vald())) return(NULL)
+      div(
+        class = "rd-hint",
+        checkboxInput(ns("intro_med"), "Inkludera introduktionsprogrammen", value = FALSE)
       )
     })
 
@@ -1087,6 +1104,22 @@ mod_gymnasiet_server <- function(id) {
       } else if (isTRUE(ind$kon) && kon_lage() == "kon") {
         skapa_diagram_trend_kon(min_antal = 0, df, ind$metrik_kv, ind$metrik_man, ind$metrik_label, prog,
                                 rubrik = rub, underrubrik = sub, kalla = ind$kalla)
+      } else if (valt_vy() == "dashboard" && identical(ind$metrik, "antal_elever") && is.null(prog)) {
+        # Totalen (inget program valt): använd Skolverkets egna aggregatrad
+        # "Nationella program" i stället för att summera ihop de enskilda
+        # programraderna själva - annars bidrar inte de elever som bara
+        # syns i aggregatet (t.ex. riksrekryterande utbildningar) till
+        # summan. Introduktionsprogrammen är en egen aggregatrad och
+        # räknas bara med om kryssrutan under diagrammet är ikryssad,
+        # så standardläget matchar Skolverkets "Nationella program"-tal.
+        intro_med <- isTRUE(input$intro_med)
+        df_total <- dplyr::filter(
+          data_bas(),
+          prog_niva == "total" | (intro_med & program == "Introduktionsprogrammen"))
+        sub_total <- paste0(sub, if (intro_med) " · inkl. introduktionsprogrammen"
+                            else " · exkl. introduktionsprogrammen")
+        skapa_diagram_trend(min_antal = 0, df_total, ind$metrik, ind$metrik_label, NULL,
+                            rubrik = rub, underrubrik = sub_total, kalla = ind$kalla)
       } else {
         skapa_diagram_trend(min_antal = 0, df, ind$metrik, ind$metrik_label, prog,
                             rubrik = rub, underrubrik = sub, kalla = ind$kalla)
