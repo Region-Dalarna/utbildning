@@ -943,15 +943,18 @@ mod_gymnasiet_server <- function(id) {
     # Introduktionsprogrammen räknas som standard inte med i totalen för
     # elevindikatorerna (utvecklingen över tid), så den matchar Skolverkets
     # egen "Nationella program"-summa. Kryssrutan låter användaren slå på
-    # dem. Visas bara för totalvyn (inget program valt) - gäller alla
-    # elevindikatorer (Antal elever, Elever per årskurs, andelarna), inte
-    # bara "Antal elever".
+    # dem, och gäller då alla elevindikatorer (Antal elever, Elever per
+    # årskurs, andelarna) - inte bara den som just visas. renderUI körs om
+    # varje gång man byter till en annan vy (dashboard/arskurs/andel), så
+    # value måste läsas från det senast kända värdet (isolate) - annars
+    # skulle rutan nollställas till avkryssad vid varje indikatorbyte.
     output$intro_kontroll <- renderUI({
       if (!identical(input$omrade, "elever") || !valt_vy() %in% c("dashboard", "arskurs", "andel") ||
           !is.null(program_vald())) return(NULL)
       div(
         class = "rd-hint",
-        checkboxInput(ns("intro_med"), "Inkludera introduktionsprogrammen", value = FALSE)
+        checkboxInput(ns("intro_med"), "Inkludera introduktionsprogrammen",
+                      value = isTRUE(isolate(input$intro_med)))
       )
     })
 
