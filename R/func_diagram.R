@@ -362,6 +362,19 @@ skapa_diagram_programtyp <- function(df, metrik, metrik_label, program_sel = NUL
                         tolower(sub("^Antal ", "", metrik_label)))
   pct <- function(x) scales::percent(x, accuracy = 1)
   tt  <- function(namn, ar, andel) paste0("<b>", namn, " ", ar, ":</b> ", pct(andel))
+
+  # Enskilda program saknar egen programtyp i Skolverkets elevdata (bara
+  # aggregatraderna "Högskoleförberedande program"/"Yrkesprogram" har den
+  # satt, se rensa_elevdata()). Vid nedborrning på ett sådant program sätts
+  # typen från den statiska kartan GYMN_PROGRAMTYP i stället, så att både
+  # typindelningen och själva programraden överlever filtreringen nedan
+  # (annars tolkas programmet som "Okänd programtyp").
+  if (!is.null(program_sel)) {
+    rader <- df$program == program_sel & is.na(df$programtyp)
+    if (any(rader) && program_sel %in% names(GYMN_PROGRAMTYP))
+      df$programtyp[rader] <- GYMN_PROGRAMTYP[[program_sel]]
+  }
+
   df <- dplyr::filter(df, !is.na(programtyp))
   df$programtyp <- trimws(as.character(df$programtyp))
   df <- dplyr::filter(

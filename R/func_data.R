@@ -182,6 +182,35 @@ hamta_gymnasiedata <- function(force = FALSE) {
 # ============================================================
 .elever_cache <- new.env(parent = emptyenv())
 
+# Skolverkets elevtabell saknar en egen programtyp-kolumn per enskilt
+# program (till skillnad från antagningsdatan) - bara aggregatraderna
+# "Högskoleförberedande program"/"Yrkesprogram" har den. Den här kartan
+# är Skolverkets egen, stabila indelning av de nationella programmen och
+# används som fallback när ett enskilt program ska knytas till sin typ,
+# t.ex. vid nedborrning i programtypsdiagrammet (se skapa_diagram_programtyp()).
+GYMN_PROGRAMTYP <- c(
+  "Ekonomiprogrammet"                 = "Högskoleförberedande program",
+  "Estetiska programmet"              = "Högskoleförberedande program",
+  "Humanistiska programmet"           = "Högskoleförberedande program",
+  "Naturvetenskapsprogrammet"         = "Högskoleförberedande program",
+  "Samhällsvetenskapsprogrammet"      = "Högskoleförberedande program",
+  "Teknikprogrammet"                  = "Högskoleförberedande program",
+  "International Baccalaureate"       = "Högskoleförberedande program",
+  "Barn- och fritidsprogrammet"       = "Yrkesprogram",
+  "Bygg- och anläggningsprogrammet"   = "Yrkesprogram",
+  "El- och energiprogrammet"          = "Yrkesprogram",
+  "Fordons- och transportprogrammet"  = "Yrkesprogram",
+  "Frisör- och stylistprogrammet"     = "Yrkesprogram",
+  "Försäljnings- och serviceprogrammet" = "Yrkesprogram",
+  "Hantverksprogrammet"               = "Yrkesprogram",
+  "Hotell- och turismprogrammet"      = "Yrkesprogram",
+  "Industritekniska programmet"       = "Yrkesprogram",
+  "Naturbruksprogrammet"              = "Yrkesprogram",
+  "Restaurang- och livsmedelsprogrammet" = "Yrkesprogram",
+  "VVS- och fastighetsprogrammet"     = "Yrkesprogram",
+  "Vård- och omsorgsprogrammet"       = "Yrkesprogram"
+)
+
 # Klassar gymnasieprogram-värdet i nivå, eftersom Skolverkets kolumn blandar
 # totaler, programtyper, enskilda program och introduktionsundertyper.
 # Tvättar elevtabellen: behåller Dalarnas kommunrader, härleder år, gör bred,
