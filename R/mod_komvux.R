@@ -102,6 +102,12 @@ mod_komvux_ui <- function(id) {
                          class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
 
@@ -118,18 +124,34 @@ mod_komvux_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_komvux_server <- function(id) {
+mod_komvux_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    lank_indikator_forst <- shiny::reactiveVal(TRUE)
+
+    shiny::observe({
+      sel <- if (!is.null(lank$utbtyp) && lank$utbtyp %in% c("_alla_", "Komvux", "SFI"))
+        lank$utbtyp else "_alla_"
+      shinyWidgets::updateRadioGroupButtons(session, "utbildningstyp", selected = sel)
+    })
+    shiny::observe({
+      sel <- if (!is.null(lank$geo) && lank$geo %in% c("_alla_", geo_val_kommun)) lank$geo else "_alla_"
+      shinyWidgets::updatePickerInput(session, "geo_val", selected = sel)
+    })
 
     output$indikator_ui <- renderUI({
       omr <- komvux_struktur[[ req(input$omrade) ]]
       ch  <- .choices_fran_lista(omr$indikatorer)
       besk <- omr$indikatorer |> purrr::map("beskrivning") |> purrr::compact()
 
+      sel <- if (lank_indikator_forst() && !is.null(lank$indikator) && lank$indikator %in% ch)
+        lank$indikator else unname(ch)[1]
+      lank_indikator_forst(FALSE)
+
       knappar <- shinyWidgets::radioGroupButtons(
         inputId = ns("indikator"), label = "Indikator",
-        choices = ch, selected = unname(ch)[1], individual = TRUE
+        choices = ch, selected = sel, individual = TRUE
       )
 
       tagList(
@@ -145,7 +167,9 @@ mod_komvux_server <- function(id) {
     })
 
     # ---- Nedborrning: nivå -> kurser ------------------------------------------
-    niva_drill <- reactiveVal(NULL)
+    # Seedas från lank$niva/lank$program om de finns - se klickhanteraren
+    # nedan för skyddet mot ggiraphs tomma start-"val".
+    niva_drill <- reactiveVal(if (!is.null(lank$niva) && nzchar(lank$niva)) lank$niva else NULL)
     # Kurserna kan visas för allt utom elever (unika personer).
     kan_borra <- reactive(!isTRUE(valt_indikator()$unika) && valt_vy() != "kommun_kon")
     observeEvent(kan_borra(), { if (!kan_borra()) { niva_drill(NULL); program_vald(NULL) } })
@@ -188,9 +212,20 @@ mod_komvux_server <- function(id) {
       if (!is.null(ut) && ut != "_alla_") dplyr::filter(d, utbildningstyp == ut) else d
     }
 
-    program_vald <- reactiveVal(NULL)
+    program_vald <- reactiveVal(if (!is.null(lank$program) && nzchar(lank$program)) lank$program else NULL)
+    # ggiraph skickar sitt tomma startvärde för klickbara staplar redan vid
+    # widgetens egen initiering, inte bara vid en riktig avmarkeringsklick -
+    # det skulle annars nollställa en lank-satt nivå/kurs direkt vid
+    # sidladdning. Skydda bara den första körningen, och bara om en länk
+    # väntar (annars är det en vanlig avmarkeringsklick som ska gälla).
+    skydda_lank_klick <- reactiveVal(
+      (!is.null(lank$niva) && nzchar(lank$niva)) || (!is.null(lank$program) && nzchar(lank$program))
+    )
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      forsta_korning <- skydda_lank_klick()
+      skydda_lank_klick(FALSE)
+      if (forsta_korning && (length(sel) == 0 || !nzchar(sel[1]))) return(invisible(NULL))
       if (identical(isolate(valt_vy()), "kommun_kon")) {
         # Deltagare: klick på en kommunstapel väljer kommunen i filtret.
         if (length(sel) == 1)
@@ -222,7 +257,9 @@ mod_komvux_server <- function(id) {
       d <- aktuell_data()
       tidigare_ar <- isolate(input$ar)
       ar <- sort(unique(d$ar), decreasing = TRUE)
-      behall <- if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(ar)) tidigare_ar else max(ar)
+      behall <- if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(ar)) tidigare_ar
+                else if (!is.null(lank$ar) && lank$ar %in% as.character(ar)) lank$ar
+                else max(ar)
       selectInput(ns("ar"), "År", choices = ar, selected = behall)
     })
 
@@ -275,7 +312,10 @@ mod_komvux_server <- function(id) {
                      shinyWidgets::radioGroupButtons(
                        inputId  = ns("kon_lage"), label = NULL,
                        choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
-                       selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+                       selected = isolate(if (!is.null(input$kon_lage)) input$kon_lage
+                                          else if (!is.null(lank$kon_lage) &&
+                                                   lank$kon_lage %in% c("kon", "total")) lank$kon_lage
+                                          else "kon"),
                        size = "sm"))),
           column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
         ))
@@ -389,5 +429,18 @@ mod_komvux_server <- function(id) {
       filename = function() "komvux_hela_datasetet.xlsx",
       content  = function(file) skriv_gymnasie_excel(aktuell_data(), file, blad = "Komvux")
     )
+
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik      = "komvux",
+        indikator = input$indikator,
+        utbtyp    = input$utbildningstyp,
+        geo       = input$geo_val,
+        ar        = input$ar,
+        kon_lage  = input$kon_lage,
+        niva      = niva_drill(),
+        program   = program_vald()
+      ))
+    })
   })
 }

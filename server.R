@@ -1,13 +1,30 @@
 shinyServer(function(input, output, session) {
 
+  # ---- Djuplänkning: läs ev. query-parametrar i URL:en en gång vid start.
+  # flik=<slug> väljer flik direkt (se R/def_lankning.R för slugs); övriga
+  # parametrar tolkas av respektive modul.
+  lank <- shiny::isolate(shiny::parseQueryString(session$clientData$url_search))
+
+  if (!is.null(lank$flik) && lank$flik %in% names(FLIK_SLUGS)) {
+    shiny::updateTabsetPanel(session, 'skolform', selected = FLIK_SLUGS[[lank$flik]])
+  }
+
+  # Håll adressfältet synkat med vald flik, så att den går att dela utan
+  # någon extra "kopiera länk"-knapp (ignoreInit så vi inte skriver över
+  # en fullständig diagramlänk direkt vid sidladdning).
+  shiny::observeEvent(input$skolform, ignoreInit = TRUE, {
+    slug <- names(FLIK_SLUGS)[match(input$skolform, FLIK_SLUGS)]
+    if (!is.na(slug)) shiny::updateQueryString(paste0('?flik=', slug), mode = 'replace')
+  })
+
   # En modul per skolform.
-  mod_forskola_server('forskola')
-  mod_gymnasiet_server('gym')
-  mod_yh_server('yh')
-  mod_komvux_server('komvux')
-  mod_hogskola_server('hogskola')
-  mod_grundskola_server('grundskola')
-  mod_folkhogskola_server('folkhogskola')
-  mod_prognos_server('prognos')
+  mod_forskola_server('forskola', lank = lank)
+  mod_gymnasiet_server('gym', lank = lank)
+  mod_yh_server('yh', lank = lank)
+  mod_komvux_server('komvux', lank = lank)
+  mod_hogskola_server('hogskola', lank = lank)
+  mod_grundskola_server('grundskola', lank = lank)
+  mod_folkhogskola_server('folkhogskola', lank = lank)
+  mod_prognos_server('prognos', lank = lank)
 
 })

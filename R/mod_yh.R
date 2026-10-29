@@ -133,6 +133,12 @@ mod_yh_ui <- function(id) {
                          class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
 
@@ -149,18 +155,42 @@ mod_yh_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_yh_server <- function(id) {
+mod_yh_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # ---- Djuplänkning: område + indikator (se mod_folkhogskola.R för
+    # samma mönster med kommentar om varför omrade_malvarde används i
+    # stället för en enkel "första körningen"-flagga).
+    omrade_default  <- names(yh_struktur)[1]
+    omrade_malvarde <- if (!is.null(lank$omrade) && lank$omrade %in% names(yh_struktur))
+      lank$omrade else omrade_default
+    lank_indikator_forst <- shiny::reactiveVal(TRUE)
+    lank_omrade_forst <- shiny::reactiveVal(!identical(omrade_malvarde, omrade_default))
+
+    shiny::observe({
+      if (!identical(omrade_malvarde, omrade_default))
+        shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = omrade_malvarde)
+    })
+    shiny::observe({
+      sel <- if (!is.null(lank$geo) && lank$geo %in% c("_alla_", geo_val_kommun)) lank$geo else "_alla_"
+      shinyWidgets::updatePickerInput(session, "geo_val", selected = sel)
+    })
+
     output$indikator_ui <- renderUI({
-      omr <- yh_struktur[[ req(input$omrade) ]]
+      omr_id <- req(input$omrade)
+      omr <- yh_struktur[[ omr_id ]]
       ch  <- .choices_fran_lista(omr$indikatorer)
       besk <- omr$indikatorer |> purrr::map("beskrivning") |> purrr::compact()
 
+      sel <- if (lank_indikator_forst() && identical(omr_id, omrade_malvarde) &&
+                 !is.null(lank$indikator) && lank$indikator %in% ch) lank$indikator
+             else unname(ch)[1]
+      if (identical(omr_id, omrade_malvarde)) lank_indikator_forst(FALSE)
+
       knappar <- shinyWidgets::radioGroupButtons(
         inputId = ns("indikator"), label = "Indikator",
-        choices = ch, selected = unname(ch)[1], individual = TRUE
+        choices = ch, selected = sel, individual = TRUE
       )
 
       tagList(
@@ -218,10 +248,22 @@ mod_yh_server <- function(id) {
     # ---- Nedborrning: område -> utbildningar -----------------------------------
     # omrade_drill = utbildningsområdet man klickat på (staplarna visar då dess
     # utbildningar), utb_vald = vald utbildning (för trenden).
-    omrade_drill <- reactiveVal(NULL)
-    utb_vald     <- reactiveVal(NULL)
+    omrade_drill <- reactiveVal(if (!is.null(lank$omrade_drill) && nzchar(lank$omrade_drill))
+      lank$omrade_drill else NULL)
+    utb_vald     <- reactiveVal(if (!is.null(lank$utb_vald) && nzchar(lank$utb_vald))
+      lank$utb_vald else NULL)
+    # ggiraph skickar sitt tomma startvärde för klickbara staplar redan vid
+    # widgetens egen initiering - skydda bara den första körningen, och bara
+    # om en länk väntar (se mod_komvux.R för samma mönster).
+    skydda_lank_klick <- reactiveVal(
+      (!is.null(lank$omrade_drill) && nzchar(lank$omrade_drill)) ||
+        (!is.null(lank$utb_vald) && nzchar(lank$utb_vald))
+    )
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      forsta_korning <- skydda_lank_klick()
+      skydda_lank_klick(FALSE)
+      if (forsta_korning && (length(sel) == 0 || !nzchar(sel[1]))) return(invisible(NULL))
       if (isolate(valt_vy()) == "arbetsort") return()      # staplarna är arbetskommuner
       if (is.null(isolate(omrade_drill()))) {
         if (length(sel) == 1) { omrade_drill(sel); utb_vald(NULL) }
@@ -230,7 +272,13 @@ mod_yh_server <- function(id) {
       }
     }, ignoreNULL = FALSE)
     observeEvent(input$tillbaka, { omrade_drill(NULL); utb_vald(NULL) })
-    observeEvent(input$omrade, { omrade_drill(NULL); utb_vald(NULL) }, ignoreInit = TRUE)
+    # input$omrade byts asynkront (en gång) om lank$omrade skiljer sig från
+    # standardvalet - den förväntade ändringen ska inte nollställa en
+    # lank-satt nedborrning, bara en riktig användarändring.
+    observeEvent(input$omrade, {
+      if (lank_omrade_forst()) { lank_omrade_forst(FALSE); return(invisible(NULL)) }
+      omrade_drill(NULL); utb_vald(NULL)
+    }, ignoreInit = TRUE)
 
     # Staplarnas nivå: områdena, eller utbildningarna i valt område.
     niva <- function(d) yh_niva(d, omrade_drill())
@@ -266,7 +314,9 @@ mod_yh_server <- function(id) {
     observeEvent(valt_vy(), {
       if (valt_vy() == "arbetsort" && identical(antal_ar_vald(), "alla")) antal_ar_vald("1")
     })
-    antal_ar_vald <- reactiveVal("1")
+    antal_ar_vald <- reactiveVal(
+      if (!is.null(lank$antal_ar) && lank$antal_ar %in% c("1", "3", "5", "alla")) lank$antal_ar else "1"
+    )
     lapply(c("1", "3", "5", "alla"), function(v) {
       observeEvent(input[[paste0("arbtn_", v)]], {
         if (!(v == "alla" && valt_vy() == "arbetsort")) antal_ar_vald(v)
@@ -311,7 +361,12 @@ mod_yh_server <- function(id) {
       d_et <- yh_niva(hamta_yh_etablering())
       prg <- sort(unique(stats::na.omit(d_et$program[d_et$geo_niva %in% c("kommun", "lan")])))
       tidigare <- isolate(input$program_filter)
-      vald <- if (!is.null(tidigare) && length(tidigare) > 0 && all(tidigare %in% prg)) tidigare else prg
+      vald <- if (!is.null(tidigare) && length(tidigare) > 0 && all(tidigare %in% prg)) tidigare
+              else {
+                fran_lank <- if (!is.null(lank$program_filter))
+                  intersect(strsplit(lank$program_filter, ",", fixed = TRUE)[[1]], prg) else character(0)
+                if (length(fran_lank) > 0) fran_lank else prg
+              }
       shinyWidgets::pickerInput(
         inputId = ns("program_filter"), label = "Filtrera utbildningsområde",
         choices = prg, selected = vald, multiple = TRUE,
@@ -327,7 +382,8 @@ mod_yh_server <- function(id) {
     output$ofullstandiga_ui <- renderUI({
       req(valt_vy() == "genomstromning")
       checkboxInput(ns("visa_ofullstandiga"), "Visa ofullständiga årgångar",
-                    value = isolate(visa_ofullstandiga()))
+                    value = isolate(if (!is.null(input$visa_ofullstandiga)) input$visa_ofullstandiga
+                                    else isTRUE(lank$visa_ofullstandiga %in% c("1", "true", "TRUE"))))
     })
     # Urvalets årgångar (område/utbildning i vald kommun) med status.
     gs_urval_ar <- reactive({
@@ -341,7 +397,12 @@ mod_yh_server <- function(id) {
       if (vy %in% c("etablering", "arbetsort")) {
         tillg <- examensar_tillg()
         valda <- isolate(input$examensar)
-        valda <- if (!is.null(valda) && all(as.integer(valda) %in% tillg)) valda else utils::head(tillg, 3)
+        valda <- if (!is.null(valda) && length(valda) > 0 && all(as.integer(valda) %in% tillg)) valda
+                 else {
+                   fran_lank <- if (!is.null(lank$examensar))
+                     intersect(as.integer(strsplit(lank$examensar, ",", fixed = TRUE)[[1]]), tillg) else integer(0)
+                   if (length(fran_lank) > 0) fran_lank else utils::head(tillg, 3)
+                 }
         return(shinyWidgets::pickerInput(
           ns("examensar"), "Examensår", choices = tillg, selected = valda, multiple = TRUE,
           options = shinyWidgets::pickerOptions(selectedTextFormat = "count > 4",
@@ -352,11 +413,15 @@ mod_yh_server <- function(id) {
         ar <- sort(s$ar[visa_ofullstandiga() | s$status %in% c("komplett", "varning")], decreasing = TRUE)
         req(length(ar) > 0)
         return(selectInput(ns("ar"), "Startår", choices = ar,
-                           selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare else max(ar)))
+                           selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare
+                                      else if (!is.null(lank$ar) && lank$ar %in% as.character(ar)) lank$ar
+                                      else max(ar)))
       }
       ar <- sort(unique(aktuell_data()$ar), decreasing = TRUE)
       selectInput(ns("ar"), "År", choices = ar,
-                  selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare else max(ar))
+                  selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare
+                             else if (!is.null(lank$ar) && lank$ar %in% as.character(ar)) lank$ar
+                             else max(ar))
     })
 
     data_bas <- reactive(geo_filter(aktuell_data()))
@@ -444,7 +509,10 @@ mod_yh_server <- function(id) {
           shinyWidgets::radioGroupButtons(
             inputId = ns("kon_lage"), label = NULL,
             choices = c("Könsuppdelat" = "kon", "Totalt" = "total"),
-            selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+            selected = isolate(if (!is.null(input$kon_lage)) input$kon_lage
+                               else if (!is.null(lank$kon_lage) &&
+                                        lank$kon_lage %in% c("kon", "total")) lank$kon_lage
+                               else "kon"),
             size = "sm"))
     })
 
@@ -704,5 +772,22 @@ mod_yh_server <- function(id) {
         skriv_gymnasie_excel(d, file, blad = "YH")
       }
     )
+
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik              = "yh",
+        omrade            = input$omrade,
+        indikator         = input$indikator,
+        geo               = input$geo_val,
+        ar                = input$ar,
+        examensar         = paste(input$examensar, collapse = ","),
+        antal_ar          = antal_ar_vald(),
+        program_filter    = paste(input$program_filter, collapse = ","),
+        visa_ofullstandiga = if (isTRUE(input$visa_ofullstandiga)) "1" else NULL,
+        kon_lage          = input$kon_lage,
+        omrade_drill      = omrade_drill(),
+        utb_vald          = utb_vald()
+      ))
+    })
   })
 }

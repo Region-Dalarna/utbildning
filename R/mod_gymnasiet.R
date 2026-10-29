@@ -233,6 +233,12 @@ mod_gymnasiet_ui <- function(id) {
                          class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
 
@@ -250,17 +256,40 @@ mod_gymnasiet_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_gymnasiet_server <- function(id) {
+mod_gymnasiet_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     # Statistikområdet Avgångna har en egen modul (mod_gymnasiet_avgangna.R).
     mod_gymnasiet_avgangna_server("avg")
 
     ns <- session$ns
 
+    # ---- Djuplänkning: omrade (statiskt val i UI:n, 5 lägen inkl.
+    # "avgangna" som inte finns i gymnasiet_struktur) + indikator. Se
+    # mod_folkhogskola.R för omrade_malvarde-mönstret.
+    omrade_default  <- names(gymnasiet_struktur)[1]
+    omrade_malvarde <- if (!is.null(lank$omrade) &&
+                           lank$omrade %in% c(names(gymnasiet_struktur), "avgangna"))
+      lank$omrade else omrade_default
+    lank_indikator_forst <- shiny::reactiveVal(TRUE)
+    lank_omrade_forst <- shiny::reactiveVal(!identical(omrade_malvarde, omrade_default))
+    geo_niva_malvarde <- if (!is.null(lank$geo_niva) && lank$geo_niva %in% c("kommun", "samverkansomrade"))
+      lank$geo_niva else "kommun"
+    lank_geo_forst <- shiny::reactiveVal(TRUE)
+
+    shiny::observe({
+      if (!identical(omrade_malvarde, omrade_default))
+        shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = omrade_malvarde)
+    })
+    shiny::observe({
+      if (!identical(geo_niva_malvarde, "kommun"))
+        shinyWidgets::updateRadioGroupButtons(session, "geo_niva", selected = geo_niva_malvarde)
+    })
+
     output$indikator_ui <- renderUI({
       # Avgångna har egen modul och finns inte i gymnasiet_struktur.
       req(input$omrade %in% names(gymnasiet_struktur))
-      omr <- gymnasiet_struktur[[input$omrade]]
+      omr_id <- input$omrade
+      omr <- gymnasiet_struktur[[omr_id]]
       ch   <- .choices_fran_lista(omr$indikatorer)
       # value -> beskrivning, bara för indikatorer som har en beskrivning satt.
       # OBS: radioGroupButtons() bygger sina <button>-taggar lat (via
@@ -276,9 +305,14 @@ mod_gymnasiet_server <- function(id) {
         purrr::map("beskrivning") |>
         purrr::compact()
 
+      sel <- if (lank_indikator_forst() && identical(omr_id, omrade_malvarde) &&
+                 !is.null(lank$indikator) && lank$indikator %in% ch) lank$indikator
+             else unname(ch)[1]
+      if (identical(omr_id, omrade_malvarde)) lank_indikator_forst(FALSE)
+
       knappar <- shinyWidgets::radioGroupButtons(
         inputId = ns("indikator"), label = "Indikator",
-        choices = ch, selected = unname(ch)[1], individual = TRUE
+        choices = ch, selected = sel, individual = TRUE
       )
 
       tagList(
@@ -312,7 +346,10 @@ mod_gymnasiet_server <- function(id) {
           inputId  = ns("prog_eller_inriktning"),
           label    = "Visa per",
           choices  = c("Program" = "program", "Inriktning" = "inriktning"),
-          selected = isolate(input$prog_eller_inriktning) %||% "program",
+          selected = isolate(input$prog_eller_inriktning) %||%
+            (if (!is.null(lank$prog_eller_inriktning) &&
+                 lank$prog_eller_inriktning %in% c("program", "inriktning")) lank$prog_eller_inriktning
+             else "program"),
           size = "sm"
         ),
         {
@@ -377,7 +414,12 @@ mod_gymnasiet_server <- function(id) {
       # Behåll tidigare urval om det finns – annars markera alla
       tidigare <- isolate(input$program_filter)
       vald <- if (!is.null(tidigare) && length(tidigare) > 0 &&
-                  all(tidigare %in% prg)) tidigare else prg
+                  all(tidigare %in% prg)) tidigare
+              else {
+                fran_lank <- if (!is.null(lank$program_filter))
+                  intersect(strsplit(lank$program_filter, ",", fixed = TRUE)[[1]], prg) else character(0)
+                if (length(fran_lank) > 0) fran_lank else prg
+              }
       shinyWidgets::pickerInput(
         inputId  = ns("program_filter"),
         label    = "Filtrera program",
@@ -474,7 +516,12 @@ mod_gymnasiet_server <- function(id) {
       if (length(typer) <= 1) return(NULL)  # Dölj om bara en typ finns
       shinyWidgets::radioGroupButtons(
         inputId = ns("organisationstyp"), label = "Driftsform",
-        choices = c("Alla" = "_alla_", stats::setNames(typer, typer)), selected = "_alla_"
+        choices = c("Alla" = "_alla_", stats::setNames(typer, typer)),
+        selected = isolate(if (!is.null(input$organisationstyp) &&
+                               input$organisationstyp %in% c("_alla_", typer)) input$organisationstyp
+                           else if (!is.null(lank$organisationstyp) &&
+                                    lank$organisationstyp %in% c("_alla_", typer)) lank$organisationstyp
+                           else "_alla_")
       )
     })
 
@@ -484,8 +531,9 @@ mod_gymnasiet_server <- function(id) {
       # Behåll tidigare valt år om det finns kvar bland de nya valen
       tidigare_ar <- isolate(input$ar)
       behall <- function(giltiga, standard) {
-        if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(giltiga))
-          tidigare_ar else standard
+        if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(giltiga)) tidigare_ar
+        else if (!is.null(lank$ar) && lank$ar %in% as.character(giltiga)) lank$ar
+        else standard
       }
 
       if (vy == "genomstromning") {
@@ -524,11 +572,22 @@ mod_gymnasiet_server <- function(id) {
     observeEvent(input$geo_niva, {
       val <- if (input$geo_niva == "kommun") geo_val_kommun
              else c(stats::setNames(GYSAM_HELA, GYSAM_HELA), geo_val_samverkan)   # Hela Gysam överst
-      geo_vald_rv("_alla_")
+      # lank$geo tillämpas bara när geo_niva faktiskt nått sitt mål-värde
+      # (lank$geo_niva om satt, annars standardvalet "kommun") - geo_niva
+      # kan bytas asynkront en gång till efter den här första körningen,
+      # se lank_geo_forst/geo_niva_malvarde ovan.
+      vid_malvarde <- identical(input$geo_niva, geo_niva_malvarde)
+      sel <- if (vid_malvarde && lank_geo_forst() && !is.null(lank$geo)) {
+        giltiga <- c("_alla_", unname(val))
+        fran_lank <- intersect(strsplit(lank$geo, ",", fixed = TRUE)[[1]], giltiga)
+        if (length(fran_lank) == 0) "_alla_" else fran_lank
+      } else "_alla_"
+      if (vid_malvarde) lank_geo_forst(FALSE)
+      geo_vald_rv(sel)
       karta_forra(character(0))      # kartan ritas om utan urval
       shinyWidgets::updatePickerInput(
         session, "geo_val",
-        choices = c("Hela Dalarna" = "_alla_", val), selected = "_alla_")
+        choices = c("Hela Dalarna" = "_alla_", val), selected = sel)
     }, ignoreInit = FALSE)
 
     # Kartans markering följer valet (ggiraph: meddelandet <id>_set).
@@ -726,11 +785,13 @@ mod_gymnasiet_server <- function(id) {
       genomstromning_riket(aktuell_data(), program_val = prog, org = org_r)
     })
 
-    program_vald <- reactiveVal(NULL)
+    program_vald <- reactiveVal(if (!is.null(lank$program) && nzchar(lank$program)) lank$program else NULL)
 
     # Vald uppföljningsår (1/3/5/7/alla) för etablering. Egen reactiveVal
     # eftersom årsknapparna är actionButtons (för pålitlig gråning).
-    antal_ar_vald <- reactiveVal("1")
+    antal_ar_vald <- reactiveVal(
+      if (!is.null(lank$antal_ar) && lank$antal_ar %in% c("1", "3", "5", "7", "alla")) lank$antal_ar else "1"
+    )
     lapply(c("1", "3", "5", "7", "alla"), function(v) {
       observeEvent(input[[paste0("arbtn_", v)]], {
         antal_ar_vald(v)
@@ -743,8 +804,17 @@ mod_gymnasiet_server <- function(id) {
     # målprogrammen. ant_drill = vägen ned (program, ev. IM-variant),
     # ant_fokus = vald stapel på aktuell nivå (för trenden). program_vald
     # behåller programmet (programtypsdiagrammet).
-    ant_drill <- reactiveVal(character(0))
-    ant_fokus <- reactiveVal(NULL)
+    ant_drill <- reactiveVal(if (!is.null(lank$ant_drill) && nzchar(lank$ant_drill))
+      strsplit(lank$ant_drill, ">", fixed = TRUE)[[1]] else character(0))
+    ant_fokus <- reactiveVal(if (!is.null(lank$ant_fokus) && nzchar(lank$ant_fokus)) lank$ant_fokus else NULL)
+    # ggiraph skickar sitt tomma startvärde för klickbara staplar redan vid
+    # widgetens egen initiering - skydda bara den första körningen, och bara
+    # om en länk väntar (se mod_komvux.R för samma mönster).
+    skydda_lank_klick <- reactiveVal(
+      (!is.null(lank$program) && nzchar(lank$program)) ||
+        (!is.null(lank$ant_drill) && nzchar(lank$ant_drill)) ||
+        (!is.null(lank$ant_fokus) && nzchar(lank$ant_fokus))
+    )
     ar_antagning <- reactive(identical(input$omrade, "antagning") && valt_vy() == "dashboard" &&
                                "inriktning" %in% names(aktuell_data()))
     .ant_kol <- c("program", "inriktning", "mal")
@@ -776,6 +846,9 @@ mod_gymnasiet_server <- function(id) {
 
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      forsta_korning <- skydda_lank_klick()
+      skydda_lank_klick(FALSE)
+      if (forsta_korning && (length(sel) == 0 || !nzchar(sel[1]))) return(invisible(NULL))
       if (isolate(ar_antagning())) {
         p <- isolate(ant_drill())
         if (length(sel) != 1) {
@@ -842,6 +915,10 @@ mod_gymnasiet_server <- function(id) {
     # BARA när man byter statistikområde – inte vid indikatorbyte och inte
     # vid ändring av examensperiod, geografi, driftsform osv.
     observeEvent(input$omrade, {
+      # Omrade kan bytas asynkront en gång vid start om lank$omrade skiljer
+      # sig från standardvalet - den förväntade ändringen ska inte
+      # nollställa en lank-satt klickning, bara en riktig användarändring.
+      if (lank_omrade_forst()) { lank_omrade_forst(FALSE); return(invisible(NULL)) }
       program_vald(NULL)
       ant_drill(character(0)); ant_fokus(NULL)
       # Nollställ programfiltret (visa alla) vid byte av statistikområde
@@ -935,7 +1012,11 @@ mod_gymnasiet_server <- function(id) {
         shinyWidgets::radioGroupButtons(
           inputId  = ns("kon_lage"), label = NULL,
           choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
-          selected = "kon", size = "sm"
+          selected = isolate(if (!is.null(input$kon_lage)) input$kon_lage
+                             else if (!is.null(lank$kon_lage) && lank$kon_lage %in% c("kon", "total"))
+                               lank$kon_lage
+                             else "kon"),
+          size = "sm"
         )
       )
     })
@@ -954,7 +1035,8 @@ mod_gymnasiet_server <- function(id) {
       div(
         class = "rd-hint",
         checkboxInput(ns("intro_med"), "Inkludera introduktionsprogrammen",
-                      value = isTRUE(isolate(input$intro_med)))
+                      value = isolate(if (!is.null(input$intro_med)) isTRUE(input$intro_med)
+                                      else isTRUE(lank$intro_med %in% c("1", "true", "TRUE"))))
       )
     })
 
@@ -1177,5 +1259,25 @@ mod_gymnasiet_server <- function(id) {
       filename = function() paste0(input$omrade, "_hela_datasetet.xlsx"),
       content  = function(file) skriv_gymnasie_excel(nedladdning(aktuell_data()), file, min_antal = 0)
     )
+
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik                 = "gymnasiet",
+        omrade               = input$omrade,
+        indikator            = input$indikator,
+        geo_niva             = input$geo_niva,
+        geo                  = if (identical(geo_vald(), "_alla_")) NULL else paste(geo_vald(), collapse = ","),
+        organisationstyp     = input$organisationstyp,
+        ar                   = input$ar,
+        kon_lage             = input$kon_lage,
+        intro_med            = if (isTRUE(input$intro_med)) "1" else NULL,
+        prog_eller_inriktning = input$prog_eller_inriktning,
+        antal_ar             = antal_ar_vald(),
+        program_filter       = paste(input$program_filter, collapse = ","),
+        program              = program_vald(),
+        ant_drill            = paste(ant_drill(), collapse = ">"),
+        ant_fokus            = ant_fokus()
+      ))
+    })
   })
 }

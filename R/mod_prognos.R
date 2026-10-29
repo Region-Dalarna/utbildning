@@ -66,6 +66,12 @@ mod_prognos_ui <- function(id) {
           class = "rd-nedladdningar",
           downloadButton(ns("ladda_ner"), "Ladda ner aktuellt urval", class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet", class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
       mainPanel(
@@ -79,14 +85,24 @@ mod_prognos_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_prognos_server <- function(id) {
+mod_prognos_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # ---- Djuplänkning: omrade (statiskt val i UI:n, bytet sker asynkront
+    # om lank anger ett annat område än standardvalet).
+    shiny::observe({
+      if (!is.null(lank$omrade) && lank$omrade %in% names(prognos_struktur) && lank$omrade != names(prognos_struktur)[1])
+        shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = lank$omrade)
+    })
+
     output$region_ui <- renderUI({
       val <- regtop_regioner()
-      shinyWidgets::pickerInput(ns("region"), "Län", choices = val,
-                                selected = if ("20" %in% val) "20" else val[1],
+      behall <- isolate(input$region)
+      sel <- if (!is.null(behall) && behall %in% val) behall
+             else if (!is.null(lank$region) && lank$region %in% val) lank$region
+             else if ("20" %in% val) "20" else val[1]
+      shinyWidgets::pickerInput(ns("region"), "Län", choices = val, selected = sel,
                                 options = shinyWidgets::pickerOptions(liveSearch = TRUE))
     })
     omrade <- reactive(if (is.null(input$omrade)) "bedomning" else input$omrade)
@@ -106,7 +122,10 @@ mod_prognos_server <- function(id) {
       # Får INTE isoleras: knappen "En utbildningsgrupp" ska flippa om den
       # här panelen direkt, både vid klick i panelen och via
       # updateRadioGroupButtons() (t.ex. klick i översiktsdiagrammet).
-      visning_val <- if (is.null(input$visning)) "diagram" else input$visning
+      visning_val <- if (!is.null(input$visning)) input$visning
+                     else if (!is.null(lank$visning) && lank$visning %in% unname(.BEDOMNING_VISNING)) lank$visning
+                     else if (!is.null(lank$grupp) && nzchar(lank$grupp)) "grupp"
+                     else "diagram"
       if (identical(visning_val, "grupp")) {
         val <- bedomning_alla_grupper()
         return(tagList(
@@ -122,7 +141,9 @@ mod_prognos_server <- function(id) {
                                         selected = visning_val),
         selectInput(ns("aggregat"), "Utbildningsgrupper",
                     choices = c("Alla" = "_alla_", agg),
-                    selected = isolate(if (!is.null(input$aggregat) && input$aggregat %in% agg) input$aggregat)))
+                    selected = isolate(if (!is.null(input$aggregat) && input$aggregat %in% agg) input$aggregat
+                                       else if (!is.null(lank$aggregat) && lank$aggregat %in% agg) lank$aggregat
+                                       else NULL)))
     })
     observeEvent(input$bedomning_grupp, {
       req(input$bedomning_grupp)
@@ -138,7 +159,7 @@ mod_prognos_server <- function(id) {
     })
 
     # ---- Fördjupning: vald utbildningsgrupp --------------------------------
-    grupp_vald <- reactiveVal(NULL)
+    grupp_vald <- reactiveVal(if (!is.null(lank$grupp) && nzchar(lank$grupp)) lank$grupp else NULL)
     observeEvent(input$d_bedomning_selected, {
       sel <- input$d_bedomning_selected
       if (length(sel) == 1) {
@@ -261,7 +282,10 @@ mod_prognos_server <- function(id) {
                             shinyWidgets::radioGroupButtons(
                               ns("karta_klasser"), label = NULL, size = "sm",
                               choices = c("Tre klasser" = "3", "Sju klasser" = "7"),
-                              selected = isolate(if (is.null(input$karta_klasser)) "3" else input$karta_klasser))),
+                              selected = isolate(if (!is.null(input$karta_klasser)) input$karta_klasser
+                                                 else if (!is.null(lank$karta_klasser) &&
+                                                          lank$karta_klasser %in% c("3", "7")) lank$karta_klasser
+                                                 else "3"))),
                         ggiraph::girafeOutput(ns("d_karta"), height = .girafe_hojd(4.6, 6, .PROGNOS_KOL5_PX)),
                         tags$p(class = "rd-hint",
                                "Tre klasser som i SCB:s rapport (viss brist, brist och stor brist = brist). ",
@@ -514,6 +538,8 @@ mod_prognos_server <- function(id) {
       tidigare <- isolate(input$rorlighet_period)
       selectInput(ns("rorlighet_period"), "Period", choices = rorlighet_perioder(),
                   selected = if (!is.null(tidigare) && tidigare %in% rorlighet_perioder()) tidigare
+                             else if (!is.null(lank$rorlighet_period) &&
+                                      lank$rorlighet_period %in% rorlighet_perioder()) lank$rorlighet_period
                              else utils::tail(rorlighet_perioder(), 1))
     })
     vy_rorlighet <- function() {
@@ -635,8 +661,12 @@ mod_prognos_server <- function(id) {
     })
     output$larosate_ui <- renderUI({
       req(omrade() == "eftergymnasialt", isTRUE(eg_ind()$larosate))
+      sel <- isolate(input$larosate)
+      if (is.null(sel) || !sel %in% larosaten())
+        sel <- if (!is.null(lank$larosate) && lank$larosate %in% larosaten()) lank$larosate
+               else isolate(valt_larosate())
       shinyWidgets::pickerInput(ns("larosate"), "Lärosäte", choices = larosaten(),
-                                selected = isolate(valt_larosate()),
+                                selected = sel,
                                 options = shinyWidgets::pickerOptions(liveSearch = TRUE))
     })
 
@@ -679,34 +709,58 @@ mod_prognos_server <- function(id) {
         return(tagList(
           shinyWidgets::radioGroupButtons(ns("rorlighet_flode"), "Flöde", direction = "vertical",
                                           choices = stats::setNames(names(REGTOP_FLODE_TEXT), REGTOP_FLODE_TEXT),
-                                          selected = isolate(rorlighet_valt())),
+                                          selected = isolate(if (!is.null(input$rorlighet_flode)) input$rorlighet_flode
+                                                             else if (!is.null(lank$rorlighet_flode) &&
+                                                                      lank$rorlighet_flode %in% names(REGTOP_FLODE_TEXT))
+                                                               lank$rorlighet_flode
+                                                             else "inrikes_flytt")),
           uiOutput(ns("rorlighet_period_ui"))))
       if (omrade() == "vagar")
         return(selectInput(ns("vagar_grupp"), "Utbildningsgrupp", choices = vagar_grupper(),
                            selected = if (!is.null(grupp_vald()) && grupp_vald() %in% vagar_grupper())
-                                        grupp_vald() else isolate(vagar_grupp())))
+                                        grupp_vald()
+                                      else if (!is.null(lank$vagar_grupp) && lank$vagar_grupp %in% vagar_grupper())
+                                        lank$vagar_grupp
+                                      else isolate(vagar_grupp())))
       if (omrade() == "gymnasiet")
         return(tagList(
           shinyWidgets::radioGroupButtons(ns("gym_matt"), "Mått",
                                           choices = c("Elever i åk 1" = "elever_ak1", "Avgångna" = "avgangna"),
-                                          selected = isolate(gym_matt())),
+                                          selected = isolate(if (!is.null(input$gym_matt)) input$gym_matt
+                                                             else if (!is.null(lank$gym_matt) &&
+                                                                      lank$gym_matt %in% c("elever_ak1", "avgangna"))
+                                                               lank$gym_matt
+                                                             else "elever_ak1")),
           selectInput(ns("gym_programtyp"), "Programtyp",
                       choices = c("Alla" = "_alla_", "Högskoleförberedande program", "Yrkesprogram",
-                                  "Introduktionsprogram")),
+                                  "Introduktionsprogram"),
+                      selected = isolate(if (!is.null(input$gym_programtyp)) input$gym_programtyp
+                                         else if (!is.null(lank$gym_programtyp) &&
+                                                  lank$gym_programtyp %in% c("_alla_", "Högskoleförberedande program",
+                                                                            "Yrkesprogram", "Introduktionsprogram"))
+                                           lank$gym_programtyp
+                                         else "_alla_")),
           uiOutput(ns("period_ui"))))
       if (omrade() == "eftergymnasialt")
         return(tagList(
           shinyWidgets::radioGroupButtons(
             ns("eg_matt"), "Mått", direction = "vertical",
             choices = stats::setNames(names(REGTOP_EFTERGYMN), vapply(REGTOP_EFTERGYMN, `[[`, "", "label")),
-            selected = isolate(if (is.null(input$eg_matt)) "yh_antagna" else input$eg_matt)),
+            selected = isolate(if (!is.null(input$eg_matt)) input$eg_matt
+                               else if (!is.null(lank$eg_matt) && lank$eg_matt %in% names(REGTOP_EFTERGYMN))
+                                 lank$eg_matt
+                               else "yh_antagna")),
           uiOutput(ns("larosate_ui")),
           uiOutput(ns("period_ui"))))
       NULL
     })
     output$period_ui <- renderUI({
       req(length(prognosperioder()) > 0)
-      selectInput(ns("period"), "Prognosperiod", choices = prognosperioder(), selected = isolate(vald_period()))
+      tidigare <- isolate(input$period)
+      sel <- if (!is.null(tidigare) && tidigare %in% prognosperioder()) tidigare
+             else if (!is.null(lank$period) && lank$period %in% prognosperioder()) lank$period
+             else isolate(vald_period())
+      selectInput(ns("period"), "Prognosperiod", choices = prognosperioder(), selected = sel)
     })
 
     vy_period <- function() {
@@ -773,6 +827,26 @@ mod_prognos_server <- function(id) {
       content  = function(file) skriv_gymnasie_excel(dplyr::select(regtop_bedomning(), -har_bedomning),
                                                      file, blad = "Prognos 2040", min_antal = 0)
     )
+
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik              = "prognos",
+        omrade            = input$omrade,
+        region            = input$region,
+        visning           = input$visning,
+        aggregat          = input$aggregat,
+        grupp             = grupp_vald(),
+        karta_klasser     = input$karta_klasser,
+        rorlighet_flode   = input$rorlighet_flode,
+        rorlighet_period  = input$rorlighet_period,
+        vagar_grupp       = input$vagar_grupp,
+        gym_matt          = input$gym_matt,
+        gym_programtyp    = input$gym_programtyp,
+        eg_matt           = input$eg_matt,
+        larosate          = input$larosate,
+        period            = input$period
+      ))
+    })
   })
 }
 

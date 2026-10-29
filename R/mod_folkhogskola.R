@@ -99,6 +99,12 @@ mod_folkhogskola_ui <- function(id) {
                          class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
 
@@ -115,18 +121,48 @@ mod_folkhogskola_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_folkhogskola_server <- function(id) {
+mod_folkhogskola_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
+    # ---- Djuplänkning: område + indikator -------------------------------
+    # omrade är ett statiskt val i UI:n (bara ett av dem renderas direkt) -
+    # om lank anger ett annat område sker bytet asynkront (updateRadioGroup-
+    # Buttons nedan) och trigger en EXTRA körning av indikator_ui/omrade-
+    # observern innan input$omrade stabiliserat sig på lank$omrade. Flaggan
+    # jämförs därför mot omrade_malvarde, inte bara "första körningen".
+    omrade_default  <- names(folkhogskola_struktur)[1]
+    omrade_malvarde <- if (!is.null(lank$omrade) && lank$omrade %in% names(folkhogskola_struktur))
+      lank$omrade else omrade_default
+    lank_indikator_forst <- shiny::reactiveVal(TRUE)
+    # Bara om omrade verkligen kommer bytas asynkront ska det första
+    # change-eventet på input$omrade ignoreras (annars svalde vi av misstag
+    # användarens första egna områdesbyte också).
+    lank_omrade_forst <- shiny::reactiveVal(!identical(omrade_malvarde, omrade_default))
+
+    shiny::observe({
+      if (!identical(omrade_malvarde, omrade_default))
+        shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = omrade_malvarde)
+    })
+    shiny::observe({
+      sel <- if (!is.null(lank$huvudman) && lank$huvudman %in% c("_alla_", "Region", "Enskild"))
+        lank$huvudman else "_alla_"
+      shinyWidgets::updateRadioGroupButtons(session, "huvudman", selected = sel)
+    })
     output$indikator_ui <- renderUI({
-      omr <- folkhogskola_struktur[[ req(input$omrade) ]]
+      omr_id <- req(input$omrade)
+      omr <- folkhogskola_struktur[[ omr_id ]]
       ch  <- .choices_fran_lista(omr$indikatorer)
       besk <- omr$indikatorer |> purrr::map("beskrivning") |> purrr::compact()
 
+      sel <- if (lank_indikator_forst() && identical(omr_id, omrade_malvarde) &&
+                 !is.null(lank$indikator) && lank$indikator %in% ch) lank$indikator
+             else unname(ch)[1]
+      if (identical(omr_id, omrade_malvarde)) lank_indikator_forst(FALSE)
+
       knappar <- shinyWidgets::radioGroupButtons(
         inputId = ns("indikator"), label = "Indikator",
-        choices = ch, selected = unname(ch)[1], individual = TRUE
+        choices = ch, selected = sel, individual = TRUE
       )
 
       tagList(
@@ -172,18 +208,32 @@ mod_folkhogskola_server <- function(id) {
       if (!is.null(hm) && hm != "_alla_") dplyr::filter(d, organisationstyp == hm) else d
     }
 
-    # Bara kommuner som har folkhögskola (rader) i datan.
+    # Bara kommuner som har folkhögskola (rader) i datan. selected föredrar
+    # ett redan satt eget val, därefter lank$geo (bara relevant innan
+    # input$geo_val någonsin satts, dvs. den allra första körningen).
     observe({
       d <- aktuell_data()
       finns <- geo_val_kommun[geo_val_kommun %in% d$kommkod[d$geo_niva == "kommun"]]
+      giltiga <- c("_alla_", unname(finns))
+      behall  <- isolate(input$geo_val)
+      sel <- if (!is.null(behall) && behall %in% giltiga) behall
+             else if (!is.null(lank$geo) && lank$geo %in% giltiga) lank$geo
+             else "_alla_"
       shinyWidgets::updatePickerInput(session, "geo_val",
                                       choices = c("Hela Dalarna" = "_alla_", finns),
-                                      selected = isolate(input$geo_val))
+                                      selected = sel)
     })
 
-    program_vald <- reactiveVal(NULL)
+    program_vald <- reactiveVal(if (!is.null(lank$program) && nzchar(lank$program)) lank$program else NULL)
+    # ggiraph skickar sitt tomma startvärde för klickbara staplar redan vid
+    # widgetens egen initiering, inte bara vid en riktig avmarkeringsklick -
+    # skydda bara den första körningen, och bara om en länk väntar.
+    skydda_lank_klick <- reactiveVal(!is.null(lank$program) && nzchar(lank$program))
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      forsta_korning <- skydda_lank_klick()
+      skydda_lank_klick(FALSE)
+      if (forsta_korning && (length(sel) == 0 || !nzchar(sel[1]))) return(invisible(NULL))
       if (identical(isolate(valt_vy()), "kommun_kon")) {
         # Deltagare: klick på en kommunstapel väljer kommunen i filtret.
         if (length(sel) == 1)
@@ -205,13 +255,21 @@ mod_folkhogskola_server <- function(id) {
       if (gv == "_alla_") dplyr::filter(d, geo_niva == "lan")
       else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
     })
-    observeEvent(input$omrade, { program_vald(NULL) }, ignoreInit = TRUE)
+    # input$omrade byts asynkront (en gång) om lank$omrade pekar på ett
+    # annat område än standardvalet - den förväntade ändringen ska inte
+    # nollställa ett lank-satt program_vald, bara en riktig användarändring.
+    observeEvent(input$omrade, {
+      if (lank_omrade_forst()) { lank_omrade_forst(FALSE); return(invisible(NULL)) }
+      program_vald(NULL)
+    }, ignoreInit = TRUE)
 
     output$ar_ui <- renderUI({
       d <- aktuell_data()
       tidigare_ar <- isolate(input$ar)
       ar <- sort(unique(d$ar), decreasing = TRUE)
-      behall <- if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(ar)) tidigare_ar else max(ar)
+      behall <- if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(ar)) tidigare_ar
+                else if (!is.null(lank$ar) && lank$ar %in% as.character(ar)) lank$ar
+                else max(ar)
       selectInput(ns("ar"), "År", choices = ar, selected = behall)
     })
 
@@ -247,7 +305,10 @@ mod_folkhogskola_server <- function(id) {
                      shinyWidgets::radioGroupButtons(
                        inputId  = ns("kon_lage"), label = NULL,
                        choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
-                       selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+                       selected = isolate(if (!is.null(input$kon_lage)) input$kon_lage
+                                          else if (!is.null(lank$kon_lage) &&
+                                                   lank$kon_lage %in% c("kon", "total")) lank$kon_lage
+                                          else "kon"),
                        size = "sm"))),
           column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
         ))
@@ -334,5 +395,18 @@ mod_folkhogskola_server <- function(id) {
       filename = function() "folkhogskola_hela_datasetet.xlsx",
       content  = function(file) skriv_gymnasie_excel(.folkhogskola_ra(), file, blad = "Folkhögskola")
     )
+
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik      = "folkhogskola",
+        omrade    = input$omrade,
+        indikator = input$indikator,
+        huvudman  = input$huvudman,
+        geo       = input$geo_val,
+        ar        = input$ar,
+        kon_lage  = input$kon_lage,
+        program   = program_vald()
+      ))
+    })
   })
 }

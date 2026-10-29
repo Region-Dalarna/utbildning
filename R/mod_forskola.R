@@ -78,6 +78,12 @@ mod_forskola_ui <- function(id) {
                          class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
 
@@ -94,18 +100,38 @@ mod_forskola_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_forskola_server <- function(id) {
+mod_forskola_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # ---- Djuplänkning: föredra värden från query-strängen (lank) om de
+    # finns och är giltiga, annars ordinarie standardval. Engångsflagga så
+    # bara den allra första (lank-drivna) renderingen av indikatorknapparna
+    # påverkas - byter man område senare ska det bli vanlig standardrad.
+    lank_indikator_forst <- shiny::reactiveVal(TRUE)
+
+    shiny::observe({
+      sel <- if (!is.null(lank$geo) && lank$geo %in% c("_alla_", geo_val_kommun)) lank$geo else "_alla_"
+      shinyWidgets::updatePickerInput(session, "geo_val", selected = sel)
+    })
+    shiny::observe({
+      sel <- if (!is.null(lank$bakgrund) && lank$bakgrund %in% unname(.forskola_bakgrund_val))
+        lank$bakgrund else "_alla_"
+      shinyWidgets::updatePickerInput(session, "bakgrund", selected = sel)
+    })
 
     output$indikator_ui <- renderUI({
       omr <- forskola_struktur[[ req(input$omrade) ]]
       ch  <- .choices_fran_lista(omr$indikatorer)
       besk <- omr$indikatorer |> purrr::map("beskrivning") |> purrr::compact()
 
+      sel <- if (lank_indikator_forst() && !is.null(lank$indikator) && lank$indikator %in% ch)
+        lank$indikator else unname(ch)[1]
+      lank_indikator_forst(FALSE)
+
       knappar <- shinyWidgets::radioGroupButtons(
         inputId = ns("indikator"), label = "Indikator",
-        choices = ch, selected = unname(ch)[1], individual = TRUE
+        choices = ch, selected = sel, individual = TRUE
       )
 
       tagList(
@@ -164,7 +190,11 @@ mod_forskola_server <- function(id) {
       d <- aktuell_data()
       tidigare_ar <- isolate(input$ar)
       ar <- sort(unique(d$ar), decreasing = TRUE)
-      behall <- if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(ar)) tidigare_ar else max(ar)
+      # tidigare_ar är NULL bara innan input$ar någonsin satts, dvs. den
+      # allra första körningen - där (och bara där) får lank$ar styra.
+      behall <- if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(ar)) tidigare_ar
+                else if (!is.null(lank$ar) && lank$ar %in% as.character(ar)) lank$ar
+                else max(ar)
       selectInput(ns("ar"), "År", choices = ar, selected = behall)
     })
 
@@ -213,7 +243,10 @@ mod_forskola_server <- function(id) {
                      inputId  = ns("kon_lage"), label = NULL,
                      choices  = c("Könsuppdelat" = "kon", "Totalt" = "total",
                                   "Åldersgrupper" = "alder"),
-                     selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+                     selected = isolate(if (!is.null(input$kon_lage)) input$kon_lage
+                                        else if (!is.null(lank$kon_lage) &&
+                                                 lank$kon_lage %in% c("kon", "total", "alder")) lank$kon_lage
+                                        else "kon"),
                      size = "sm"))),
         column(5, div(class = "rd-subcard", ggiraph::girafeOutput(ns("d_trend"), height = "380px")))
       )
@@ -262,5 +295,17 @@ mod_forskola_server <- function(id) {
       filename = function() "forskola_hela_datasetet.xlsx",
       content  = function(file) skriv_gymnasie_excel(hamta_forskola_data(), file, blad = "Förskola")
     )
+
+    # ---- Djuplänkning: "Kopiera länk till denna vy" --------------------
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik      = "forskola",
+        indikator = input$indikator,
+        geo       = input$geo_val,
+        ar        = input$ar,
+        bakgrund  = input$bakgrund,
+        kon_lage  = input$kon_lage
+      ))
+    })
   })
 }

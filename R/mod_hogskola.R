@@ -145,6 +145,12 @@ mod_hogskola_ui <- function(id) {
                          class = "rd-btn rd-btn--ghost"),
           downloadButton(ns("ladda_ner_alla"), "Ladda ner hela datasetet",
                          class = "rd-btn rd-btn--ghost")
+        ),
+        div(
+          style = "margin-top: 12px;",
+          actionButton(ns("kopiera_lank"), "Kopiera länk till denna vy",
+                       icon = icon("link"),
+                       class = "rd-btn rd-btn--ghost")
         )
       ),
 
@@ -161,9 +167,45 @@ mod_hogskola_ui <- function(id) {
 }
 
 # ---- Server ----------------------------------------------------------------
-mod_hogskola_server <- function(id) {
+mod_hogskola_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # ---- Djuplänkning: perspektiv + omrade + larosate + indikator -------
+    # Tre val (perspektiv/omrade/larosate) kan alla bytas asynkront vid
+    # start om lank anger andra värden än standardvalen, och alla tre
+    # triggar samma nollställning av program_vald/omrade_drill (se nedan).
+    # I stället för att gissa hur många separata körningar det blir väntar
+    # vi med att "arma" nollställningen tills alla tre faktiskt nått sina
+    # mål-värden (vid_malvarde()) - robust oavsett hur klienten batchar de
+    # asynkrona ändringarna.
+    .hskod_giltiga <- hogskola_larosaten()$hskod
+    perspektiv_malvarde <- if (!is.null(lank$perspektiv) && lank$perspektiv %in% c("larosate", "invanare"))
+      lank$perspektiv else "larosate"
+    omrade_default  <- names(hogskola_struktur)[1]
+    omrade_malvarde <- if (!is.null(lank$omrade) && lank$omrade %in% names(hogskola_struktur))
+      lank$omrade else omrade_default
+    larosate_malvarde <- if (!is.null(lank$larosate) && lank$larosate %in% .hskod_giltiga)
+      lank$larosate else NULL
+    vid_malvarde <- function() {
+      identical(if (is.null(input$perspektiv)) "larosate" else input$perspektiv, perspektiv_malvarde) &&
+        identical(if (is.null(input$omrade)) omrade_default else input$omrade, omrade_malvarde) &&
+        (is.null(larosate_malvarde) || identical(input$larosate, larosate_malvarde))
+    }
+    lank_indikator_forst <- shiny::reactiveVal(TRUE)
+
+    shiny::observe({
+      if (!identical(perspektiv_malvarde, "larosate"))
+        shinyWidgets::updateRadioGroupButtons(session, "perspektiv", selected = perspektiv_malvarde)
+    })
+    shiny::observe({
+      if (!identical(omrade_malvarde, omrade_default))
+        shinyWidgets::updateRadioGroupButtons(session, "omrade", selected = omrade_malvarde)
+    })
+    shiny::observe({
+      sel <- if (!is.null(lank$geo) && lank$geo %in% c("_alla_", geo_val_kommun)) lank$geo else "_alla_"
+      shinyWidgets::updatePickerInput(session, "geo_val", selected = sel)
+    })
 
     perspektiv <- reactive({ if (is.null(input$perspektiv)) "larosate" else input$perspektiv })
     ar_larosate <- reactive({ perspektiv() == "larosate" })
@@ -172,13 +214,19 @@ mod_hogskola_server <- function(id) {
     })
 
     output$indikator_ui <- renderUI({
-      omr <- hogskola_struktur[[ req(input$omrade) ]]
+      omr_id <- req(input$omrade)
+      omr <- hogskola_struktur[[ omr_id ]]
       ch  <- .choices_fran_lista(omr$indikatorer)
       besk <- omr$indikatorer |> purrr::map("beskrivning") |> purrr::compact()
 
+      sel <- if (lank_indikator_forst() && identical(omr_id, omrade_malvarde) &&
+                 !is.null(lank$indikator) && lank$indikator %in% ch) lank$indikator
+             else unname(ch)[1]
+      if (identical(omr_id, omrade_malvarde)) lank_indikator_forst(FALSE)
+
       knappar <- shinyWidgets::radioGroupButtons(
         inputId = ns("indikator"), label = "Indikator",
-        choices = ch, selected = unname(ch)[1], individual = TRUE
+        choices = ch, selected = sel, individual = TRUE
       )
 
       tagList(
@@ -195,9 +243,11 @@ mod_hogskola_server <- function(id) {
 
     output$larosate_ui <- renderUI({
       lar <- hogskola_larosaten()
+      sel <- isolate(input$larosate)
+      if (is.null(sel)) sel <- if (!is.null(larosate_malvarde)) larosate_malvarde else HOGSKOLA_STANDARD_HSKOD
       selectInput(ns("larosate"), "Lärosäte",
                   choices = stats::setNames(lar$hskod, lar$hskod_namn),
-                  selected = isolate(hskod_val()))
+                  selected = sel)
     })
 
     valt_indikator <- reactive({
@@ -256,17 +306,33 @@ mod_hogskola_server <- function(id) {
 
     # Examina: klick på ett ämnesområde visar dess examina (omrade_drill),
     # klick på en examen väljer den för trenden (program_vald).
-    program_vald <- reactiveVal(NULL)
-    omrade_drill <- reactiveVal(NULL)
+    program_vald <- reactiveVal(if (!is.null(lank$program) && nzchar(lank$program)) lank$program else NULL)
+    omrade_drill <- reactiveVal(if (!is.null(lank$omrade_drill) && nzchar(lank$omrade_drill))
+      lank$omrade_drill else NULL)
+    # ggiraph skickar sitt tomma startvärde för klickbara staplar redan vid
+    # widgetens egen initiering - skydda bara den första körningen, och bara
+    # om en länk väntar (se mod_komvux.R för samma mönster).
+    skydda_lank_klick <- reactiveVal(
+      (!is.null(lank$program) && nzchar(lank$program)) ||
+        (!is.null(lank$omrade_drill) && nzchar(lank$omrade_drill))
+    )
     observeEvent(input$d_bar_selected, {
       sel <- input$d_bar_selected
+      forsta_korning <- skydda_lank_klick()
+      skydda_lank_klick(FALSE)
+      if (forsta_korning && (length(sel) == 0 || !nzchar(sel[1]))) return(invisible(NULL))
       if (identical(isolate(input$omrade), "examina") && is.null(isolate(omrade_drill()))) {
         if (length(sel) == 1) { omrade_drill(sel); program_vald(NULL) }
         return()
       }
       program_vald(if (length(sel) >= 1) sel else NULL)
     }, ignoreNULL = FALSE)
+    lank_installning_forst <- reactiveVal(TRUE)
     observeEvent(list(input$omrade, input$perspektiv, input$larosate), {
+      if (lank_installning_forst()) {
+        if (vid_malvarde()) lank_installning_forst(FALSE)
+        return(invisible(NULL))
+      }
       program_vald(NULL); omrade_drill(NULL)
     }, ignoreInit = TRUE)
     observeEvent(input$tillbaka, { omrade_drill(NULL); program_vald(NULL) })
@@ -326,7 +392,9 @@ mod_hogskola_server <- function(id) {
       else dplyr::filter(d, geo_niva == "kommun", kommkod == gv)
     })
 
-    antal_ar_vald <- reactiveVal("1")
+    antal_ar_vald <- reactiveVal(
+      if (!is.null(lank$antal_ar) && lank$antal_ar %in% c("1", "3", "5", "alla")) lank$antal_ar else "1"
+    )
     lapply(c("1", "3", "5", "alla"), function(v) {
       observeEvent(input[[paste0("arbtn_", v)]], { antal_ar_vald(v) }, ignoreInit = TRUE)
     })
@@ -371,7 +439,12 @@ mod_hogskola_server <- function(id) {
       req(valt_vy() == "etablering")
       prg <- sort(unique(stats::na.omit(etablering_omrade()$program)))
       tidigare <- isolate(input$program_filter)
-      vald <- if (!is.null(tidigare) && length(tidigare) > 0 && all(tidigare %in% prg)) tidigare else prg
+      vald <- if (!is.null(tidigare) && length(tidigare) > 0 && all(tidigare %in% prg)) tidigare
+              else {
+                fran_lank <- if (!is.null(lank$program_filter))
+                  intersect(strsplit(lank$program_filter, ",", fixed = TRUE)[[1]], prg) else character(0)
+                if (length(fran_lank) > 0) fran_lank else prg
+              }
       shinyWidgets::pickerInput(
         inputId = ns("program_filter"), label = "Filtrera ämnesområde",
         choices = prg, selected = vald, multiple = TRUE,
@@ -418,7 +491,11 @@ mod_hogskola_server <- function(id) {
         inputId = ns("examenstyp"), label = "Examenstyp",
         choices = c("Alla" = "_alla_", "Generell" = "Generell examen",
                     "Yrkes" = "Yrkesexamen", "Konstnärlig" = "Konstnärlig examen"),
-        selected = if (is.null(isolate(input$examenstyp))) "_alla_" else isolate(input$examenstyp)
+        selected = isolate(if (!is.null(input$examenstyp)) input$examenstyp
+                           else if (!is.null(lank$examenstyp) &&
+                                    lank$examenstyp %in% c("_alla_", "Generell examen",
+                                                           "Yrkesexamen", "Konstnärlig examen")) lank$examenstyp
+                           else "_alla_")
       )
     })
 
@@ -426,7 +503,9 @@ mod_hogskola_server <- function(id) {
       vy <- tryCatch(valt_vy(), error = function(e) "dashboard")
       tidigare_ar <- isolate(input$ar)
       behall <- function(giltiga, standard) {
-        if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(giltiga)) tidigare_ar else standard
+        if (!is.null(tidigare_ar) && tidigare_ar %in% as.character(giltiga)) tidigare_ar
+        else if (!is.null(lank$ar) && lank$ar %in% as.character(giltiga)) lank$ar
+        else standard
       }
       if (vy == "etablering") {
         ep <- etablering_omrade() |>
@@ -468,7 +547,10 @@ mod_hogskola_server <- function(id) {
             shinyWidgets::radioGroupButtons(
               inputId  = ns("kon_lage"), label = NULL,
               choices  = c("Könsuppdelat" = "kon", "Totalt" = "total"),
-              selected = isolate(if (is.null(input$kon_lage)) "kon" else input$kon_lage),
+              selected = isolate(if (!is.null(input$kon_lage)) input$kon_lage
+                                 else if (!is.null(lank$kon_lage) &&
+                                          lank$kon_lage %in% c("kon", "total")) lank$kon_lage
+                                 else "kon"),
               size = "sm"))
       trend_id <- if (valt_vy() == "etablering") "d_etablering_trend" else "d_trend"
       fluidRow(
@@ -573,5 +655,23 @@ mod_hogskola_server <- function(id) {
       filename = function() paste0("hogskola_", perspektiv(), "_", input$omrade, ".xlsx"),
       content  = function(file) skriv_gymnasie_excel(alla_data(), file, blad = "Högskola")
     )
+
+    shiny::observeEvent(input$kopiera_lank, {
+      kopiera_lank_till_urklipp(session, list(
+        flik           = "hogskola",
+        perspektiv     = input$perspektiv,
+        omrade         = input$omrade,
+        indikator      = input$indikator,
+        larosate       = if (ar_larosate()) input$larosate else NULL,
+        geo            = if (!ar_larosate()) input$geo_val else NULL,
+        examenstyp     = input$examenstyp,
+        ar             = input$ar,
+        antal_ar       = antal_ar_vald(),
+        program_filter = paste(input$program_filter, collapse = ","),
+        kon_lage       = input$kon_lage,
+        omrade_drill   = omrade_drill(),
+        program        = program_vald()
+      ))
+    })
   })
 }
