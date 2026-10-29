@@ -16,6 +16,8 @@ library(ggplot2)
 library(ggiraph)
 library(rdshinyappar)
 
+telemetry <- skapa_telemetry("utbildning")
+
 # ---- Delade hjälpfunktioner för Samhällsanalys Shiny-appar -----------------
 # Standardrad för Region Dalarnas Shiny-appar (direkt under library()).
 #source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R",

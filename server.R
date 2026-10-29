@@ -1,5 +1,7 @@
 shinyServer(function(input, output, session) {
 
+  telemetri_server(telemetry, navigation_id = 'skolform', forsta_flik = 'Gymnasiet')
+
   # ---- Djuplänkning: läs ev. query-parametrar i URL:en en gång vid start.
   # flik=<slug> väljer flik direkt (se R/def_lankning.R för slugs); övriga
   # parametrar tolkas av respektive modul.
