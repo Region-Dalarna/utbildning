@@ -1,3 +1,5 @@
+APP_BESKRIVNING <- 'Statistik om förskola, grundskola, gymnasiet, komvux, folkhögskola, yrkeshögskola och högskola, samt prognos till 2040.'
+
 shinyUI(
   fluidPage(
     shinyjs::useShinyjs(),
