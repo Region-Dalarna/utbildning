@@ -1,7 +1,10 @@
 APP_BESKRIVNING <- 'Statistik om förskola, grundskola, gymnasiet, komvux, folkhögskola, yrkeshögskola och högskola, samt prognos till 2040.'
 
+APP_TITEL <- 'Utbildning i Dalarna'
+
 shinyUI(
   fluidPage(
+    title = APP_TITEL,  # webbläsarflikens rubrik
     shinyjs::useShinyjs(),
     tags$head(
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),
@@ -22,7 +25,7 @@ shinyUI(
     # ---- Header (full bredd via app.css) ---------------------------------
     tags$div(
       class = 'rd-header',
-      tags$div(class = 'rd-header__title', 'Utbildning i Dalarna'),
+      tags$div(class = 'rd-header__title', APP_TITEL),
       tags$a(
         class  = 'rd-header__right',
         href   = 'https://www.regiondalarna.se',
