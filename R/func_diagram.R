@@ -1450,7 +1450,8 @@ DIMENSIONERING_RIKTNING_FARGER <- c(
 # "Andel antagna" - styr bara legend/tooltip-text, inte vilken kolumn som
 # används (andel_nu är redan beräknad på rätt mått).
 skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel platser",
-                                                    rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                                    rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                                    x_max = NULL) {
   d <- df |>
     dplyr::mutate(
       # Sorteras efter Skolverkets bedömning (oberoende av om mått = platser
@@ -1482,7 +1483,14 @@ skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel plat
                   tooltip = tooltip_nu, data_id = paste(program, "nu")),
       width = 0.3) +
     ggplot2::scale_fill_manual(values = farger, breaks = c("Skolverkets bedömning", matt_label), name = NULL) +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.06))) +
+    # x_max (störst andel av platser OCH antagna, oavsett vilket som visas
+    # just nu) håller axelns skala konstant när man växlar mått - annars
+    # flyttar den sig en aning eftersom platser/antagna sällan har exakt
+    # samma maxvärde. expand ger samma marginal som tidigare, oavsett om
+    # limits är satt explicit eller (x_max = NULL) auto-skalas som förr.
+    ggplot2::scale_x_continuous(
+      limits = c(0, if (is.null(x_max)) NA else x_max),
+      expand = ggplot2::expansion(mult = c(0, 0.06))) +
     ggplot2::labs(x = "Andel (%)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +

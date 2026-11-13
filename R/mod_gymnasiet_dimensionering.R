@@ -170,6 +170,18 @@ mod_gymnasiet_dimensionering_server <- function(id) {
       d
     })
 
+    # Jämförelsen för det ANDRA måttet - bara till för att räkna ut en
+    # x-axelgräns som funkar för både platser och antagna i Platser/antagna
+    # vs bedömning, så axelns skala inte flyttar sig när man växlar mått.
+    jamforelse_ovrigt_matt <- reactive({
+      annat <- if (identical(matt(), "antagna")) "platser" else "antagna"
+      dimensionering_jamforelse(platser_org(), as.integer(req(input$ar)), annat)
+    })
+    jamforelse_x_max <- reactive({
+      max(c(jamforelse()$andel_nu, jamforelse()$andel_bedomning,
+           jamforelse_ovrigt_matt()$andel_nu), na.rm = TRUE)
+    })
+
     underrubrik <- reactive(paste0(
       omr_namn(), " · antagning ", input$ar,
       if (org() != "_alla_") paste0(" · driftsform: ", org()) else ""))
@@ -192,7 +204,8 @@ mod_gymnasiet_dimensionering_server <- function(id) {
       } else {
         skapa_diagram_dimensionering_jamforelse(
           d, matt_label = ml, rubrik = paste0(ml, " jämfört med Skolverkets bedömning"),
-          underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING)
+          underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING,
+          x_max = jamforelse_x_max())
       }
     })
 
