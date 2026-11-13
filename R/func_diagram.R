@@ -1472,7 +1472,7 @@ skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel plat
     ggiraph::geom_col_interactive(
       ggplot2::aes(x = andel_bedomning, fill = "Skolverkets bedömning",
                   tooltip = tooltip_bed, data_id = paste(program, "bed")),
-      width = 0.72, alpha = 0.4, color = RD_TEXT_MUTED, linewidth = 0.3) +
+      width = 0.42, alpha = 0.3, color = RD_TEXT_MUTED, linewidth = 0.25) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(x = andel_nu, fill = matt_label,
                   tooltip = tooltip_nu, data_id = paste(program, "nu")),
@@ -1594,13 +1594,21 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
     hjust = c(-0.05, 1.05, -0.05, 1.05), vjust = c(1.3, 1.3, -0.6, -0.6),
     label = c("Minskar - mot balans", "Ökar - redan överskott",
              "Minskar - redan brist", "Ökar - mot balans"))
+  .rod_fel_hall <- rd_farg("rd-bedomning-1", "#a6361c")
 
   g <- ggplot2::ggplot(d, ggplot2::aes(x = forandring, y = avvikelse, color = riktningsstatus)) +
+    # Svag röd bakgrund i de två "fel håll"-kvadranterna (ökar trots
+    # överskott / minskar trots brist) - en diskret varningston utan att
+    # konkurrera med punkternas egna färger.
+    ggplot2::annotate("rect", xmin = 0, xmax = Inf, ymin = 0, ymax = Inf,
+                      fill = .rod_fel_hall, alpha = 0.05) +
+    ggplot2::annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = 0,
+                      fill = .rod_fel_hall, alpha = 0.05) +
     ggplot2::geom_hline(yintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggplot2::geom_text(
       data = kvadranter, ggplot2::aes(x = x, y = y, hjust = hjust, vjust = vjust, label = label),
-      inherit.aes = FALSE, color = RD_TEXT_MUTED, size = 2.9, fontface = "italic") +
+      inherit.aes = FALSE, color = "grey70", size = 2.5, fontface = "italic") +
     ggiraph::geom_point_interactive(
       ggplot2::aes(tooltip = tooltip,
                   data_id = dplyr::if_else(.skugg, NA_character_, as.character(program)),
