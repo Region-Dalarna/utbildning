@@ -28,6 +28,11 @@ rensa_gymnasiedata <- function(rad) {
       program_inriktning = program_inriktning,
       programtyp         = programtyp,
       anskod             = if ("anskod" %in% names(rad)) anskod else NA_character_,
+      # Gy25 förde in koder för Anpassad gymnasieskola (f.d. gymnasiesärskolan)
+      # i samma antagningsdata - en helt annan skolform som inte ska blandas
+      # in i gymnasieskolans statistik. Kolonnen finns bara om nyckelfilen/
+      # skriptet som fyller tabellen hunnit uppdateras (se filter() nedan).
+      skolform           = if ("skolform" %in% names(rad)) skolform else NA_character_,
       organisationstyp   = organisationstyp,            # driftsform (kommun/fristående)
       platser            = org,
       sok_1a             = `1a_tot`,
@@ -39,6 +44,9 @@ rensa_gymnasiedata <- function(rad) {
       lediga_platser     = led_pl,
       merit_medel        = merit_medel
     ) |>
+    # NA-fallet täcker tiden innan skolform-kolumnen finns i tabellen - utan
+    # det skulle hela resultatet filtreras bort tills databasen uppdaterats.
+    dplyr::filter(is.na(skolform) | skolform != "Anpassad gymnasieskola") |>
     # Samverkansområde finns inte i tabellen – joinas på kommkod.
     dplyr::left_join(kommun_samverkan, by = "kommkod") |>
     tolka_anskod()
