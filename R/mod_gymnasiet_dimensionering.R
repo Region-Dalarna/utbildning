@@ -45,6 +45,7 @@ mod_gymnasiet_dimensionering_ui <- function(id) {
     sidebarPanel(
       width = 3, class = "rd-sidebar",
       uiOutput(ns("indikator_ui")),
+      uiOutput(ns("etiketter_ui")),
       shinyWidgets::radioGroupButtons(
         inputId = ns("matt"), label = "Mått",
         choices = c("Platser" = "platser", "Antagna" = "antagna"),
@@ -103,6 +104,13 @@ mod_gymnasiet_dimensionering_server <- function(id) {
     valt_indikator <- reactive({
       req(input$indikator %in% names(dimensionering_struktur))
       dimensionering_struktur[[input$indikator]]
+    })
+
+    # Programnamn i diagrammet är bara relevant för spridningsdiagrammet
+    # (de andra två har redan programnamn som y-axeletiketter).
+    output$etiketter_ui <- renderUI({
+      if (!identical(input$indikator, "utveckling")) return(NULL)
+      checkboxInput(ns("visa_etiketter"), "Visa programnamn i diagrammet", value = FALSE)
     })
 
     matt       <- reactive(if (is.null(input$matt)) "platser" else input$matt)
@@ -179,7 +187,8 @@ mod_gymnasiet_dimensionering_server <- function(id) {
       } else if (identical(input$indikator, "utveckling")) {
         skapa_diagram_dimensionering_scatter(
           d, matt_label = ml, rubrik = "Utveckling mot Skolverkets bedömning",
-          underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING)
+          underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING,
+          visa_etiketter = isTRUE(input$visa_etiketter))
       } else {
         skapa_diagram_dimensionering_jamforelse(
           d, matt_label = ml, rubrik = paste0(ml, " jämfört med Skolverkets bedömning"),

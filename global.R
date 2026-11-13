@@ -14,6 +14,7 @@ library(purrr)
 library(readr)
 library(ggplot2)
 library(ggiraph)
+library(ggrepel)
 library(rdshinyappar)
 
 telemetry <- skapa_telemetry("utbildning")

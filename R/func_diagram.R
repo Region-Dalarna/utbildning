@@ -1452,35 +1452,37 @@ DIMENSIONERING_RIKTNING_FARGER <- c(
 skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel platser",
                                                     rubrik = NULL, underrubrik = NULL, kalla = NULL) {
   d <- df |>
-    dplyr::mutate(program = forcats::fct_reorder(program, avvikelse))
-
-  d_punkter <- d |>
-    tidyr::pivot_longer(c(andel_nu, andel_bedomning), names_to = "serie", values_to = "andel") |>
     dplyr::mutate(
-      serie   = dplyr::if_else(serie == "andel_nu", matt_label, "Skolverkets bedömning"),
-      serie   = factor(serie, levels = c("Skolverkets bedömning", matt_label)),
-      tooltip = paste0("<b>", program, "</b><br/>", serie, ": ",
-                       scales::number(andel, accuracy = 0.1), " %"))
+      program = forcats::fct_reorder(program, avvikelse),
+      tooltip_bed = paste0("<b>", program, "</b><br/>Skolverkets bedömning: ",
+                          scales::number(andel_bedomning, accuracy = 0.1), " %"),
+      tooltip_nu  = paste0("<b>", program, "</b><br/>", matt_label, ": ",
+                          scales::number(andel_nu, accuracy = 0.1), " %<br/>Avvikelse: ",
+                          dplyr::if_else(avvikelse >= 0, "+", ""),
+                          scales::number(avvikelse, accuracy = 0.1), " procentenheter"))
 
-  # Dumbbell i stället för dubbla staplar: en tunn linje mellan Skolverkets
-  # bedömning och faktisk andel gör avståndet (= avvikelsen) direkt synligt,
-  # utan att behöva jämföra två separata stapellängder.
+  farger <- stats::setNames(c(RD_TEXT_MUTED, RD_PRIMARY), c("Skolverkets bedömning", matt_label))
+
+  # "Behållare": Skolverkets bedömning som en bred, halvgenomskinlig stapel
+  # bakom (med kant så "behållarens" slut syns tydligt), andel platser/
+  # antagna som en smalare, heltäckande stapel ovanpå. Når den smala stapeln
+  # inte fram till kanten är det brist; sticker den ut förbi kanten är det
+  # överskott.
   g <- ggplot2::ggplot(d, ggplot2::aes(y = program)) +
-    ggplot2::geom_segment(
-      ggplot2::aes(x = andel_bedomning, xend = andel_nu, yend = program),
-      color = RD_TEXT_MUTED, linewidth = 1, alpha = 0.4) +
-    ggiraph::geom_point_interactive(
-      data = d_punkter,
-      ggplot2::aes(x = andel, color = serie, tooltip = tooltip, data_id = paste(program, serie)),
-      size = 3.6) +
-    ggplot2::scale_color_manual(values = stats::setNames(c(RD_TEXT_MUTED, RD_PRIMARY),
-                                                         c("Skolverkets bedömning", matt_label)), name = NULL) +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.04, 0.08))) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(x = andel_bedomning, fill = "Skolverkets bedömning",
+                  tooltip = tooltip_bed, data_id = paste(program, "bed")),
+      width = 0.72, alpha = 0.4, color = RD_TEXT_MUTED, linewidth = 0.3) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(x = andel_nu, fill = matt_label,
+                  tooltip = tooltip_nu, data_id = paste(program, "nu")),
+      width = 0.3) +
+    ggplot2::scale_fill_manual(values = farger, breaks = c("Skolverkets bedömning", matt_label), name = NULL) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.06))) +
     ggplot2::labs(x = "Andel (%)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
-    ggplot2::theme(legend.position = "top",
-                   panel.grid.major.y = ggplot2::element_line(color = "grey92"))
+    ggplot2::theme(legend.position = "top")
 
   .girafe_std(g, width_svg = 10, height_svg = max(6, dplyr::n_distinct(d$program) * 0.42 + 1.6),
               selection = TRUE)
@@ -1494,15 +1496,32 @@ skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel plats
     dplyr::mutate(
       program = forcats::fct_reorder(program, avvikelse),
       bucket  = .dimensionering_bucket(avvikelse),
+      .skugg  = FALSE,
       tooltip = paste0("<b>", program, "</b><br/>", matt_label, ": ",
                        scales::number(andel_nu, accuracy = 0.1), " % · Bedömning: ",
                        scales::number(andel_bedomning, accuracy = 0.1), " %<br/>Avvikelse: ",
                        dplyr::if_else(avvikelse >= 0, "+", ""),
                        scales::number(avvikelse, accuracy = 0.1), " procentenheter"))
 
+  # ggiraph målar inte alltid upp rätt legendfärg för en bucket utan några
+  # rader, trots scale_fill_manual(drop = FALSE) - lägg på en osynlig rad
+  # (bredd 0, ingen tooltip) per saknad bucket på en befintlig programrad, så
+  # att legenden alltid har en riktig rad att hämta färgen från.
+  saknas <- setdiff(REGTOP_BEDOMNINGAR, as.character(d$bucket))
+  if (length(saknas) > 0) {
+    skugg <- d[rep(1, length(saknas)), ]
+    skugg$bucket    <- factor(saknas, levels = REGTOP_BEDOMNINGAR)
+    skugg$avvikelse <- 0
+    skugg$.skugg    <- TRUE
+    skugg$tooltip   <- ""
+    d <- dplyr::bind_rows(d, skugg)
+  }
+
   g <- ggplot2::ggplot(d, ggplot2::aes(x = avvikelse, y = program, fill = bucket)) +
     ggiraph::geom_col_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = as.character(program)), width = 0.74) +
+      ggplot2::aes(tooltip = tooltip,
+                  data_id = dplyr::if_else(.skugg, NA_character_, as.character(program))),
+      width = 0.74) +
     ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL, drop = FALSE) +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.08)) +
@@ -1525,10 +1544,13 @@ skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel plats
 # Skolverkets bedömning (y), ett program per punkt, färgsatt efter om
 # utvecklingen går åt det håll Skolverket bedömer och om det räcker (se
 # dimensionering_riktningsstatus() i func_data_gymnasiet_dimensionering.R).
-# Hover-tooltip i stället för permanenta etiketter (ggrepel) - blir rörigt
-# med 18 program annars.
+# Hover-tooltip är standard (blir annars rörigt med 18 program) - de fyra
+# kvadranterna är namngivna som ständigt synlig vägledning, och
+# visa_etiketter = TRUE tänder programnamn (ggrepel, undviker överlapp) för
+# den som ändå vill se alla namn samtidigt.
 skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser",
-                                                 rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+                                                 rubrik = NULL, underrubrik = NULL, kalla = NULL,
+                                                 visa_etiketter = FALSE) {
   # "Stabilt"/"Inget jämförelseår" betyder att det inte finns något att agera
   # på (Skolverket väntar sig ingen förändring, eller så saknas föregående år)
   # - de tonas ner (mindre, mer genomskinliga) så de fyra handlingsbara
@@ -1537,6 +1559,7 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
     dplyr::mutate(
       riktningsstatus = factor(riktningsstatus, levels = names(DIMENSIONERING_RIKTNING_FARGER)),
       accent  = !riktningsstatus %in% c("Stabilt", "Inget jämförelseår"),
+      .skugg  = FALSE,
       tooltip = paste0(
         "<b>", program, "</b><br/>", matt_label, " i år: ",
         scales::number(andel_nu, accuracy = 0.1), " %",
@@ -1547,24 +1570,63 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
         dplyr::if_else(avvikelse >= 0, "+", ""), scales::number(avvikelse, accuracy = 0.1), " pe",
         "<br/>", riktningsstatus))
 
+  # Samma problem och samma lösning som i skapa_diagram_dimensionering_
+  # avvikelse(): ggiraph målar inte alltid upp rätt legendfärg för en
+  # riktningsstatus utan några punkter. Lägg på en punkt utanför synligt
+  # intervall (NA-koordinater tas inte med vid ritning, men räknas med när
+  # legenden byggs) per saknad status.
+  saknas <- setdiff(names(DIMENSIONERING_RIKTNING_FARGER), as.character(d$riktningsstatus))
+  if (length(saknas) > 0) {
+    skugg <- d[rep(1, length(saknas)), ]
+    skugg$riktningsstatus <- factor(saknas, levels = names(DIMENSIONERING_RIKTNING_FARGER))
+    skugg$accent     <- !saknas %in% c("Stabilt", "Inget jämförelseår")
+    skugg$forandring <- NA_real_
+    skugg$avvikelse  <- NA_real_
+    skugg$.skugg     <- TRUE
+    skugg$tooltip    <- ""
+    d <- dplyr::bind_rows(d, skugg)
+  }
+
+  # Namngivna kvadranter, ankrade i panelens hörn oavsett dataintervall
+  # (x = ±Inf/y = ±Inf beskärs av panelen, flyttar sig inte med datan).
+  kvadranter <- data.frame(
+    x = c(-Inf, Inf, -Inf, Inf), y = c(Inf, Inf, -Inf, -Inf),
+    hjust = c(-0.05, 1.05, -0.05, 1.05), vjust = c(1.3, 1.3, -0.6, -0.6),
+    label = c("Minskar - mot balans", "Ökar - redan överskott",
+             "Minskar - redan brist", "Ökar - mot balans"))
+
   g <- ggplot2::ggplot(d, ggplot2::aes(x = forandring, y = avvikelse, color = riktningsstatus)) +
     ggplot2::geom_hline(yintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggplot2::geom_text(
+      data = kvadranter, ggplot2::aes(x = x, y = y, hjust = hjust, vjust = vjust, label = label),
+      inherit.aes = FALSE, color = RD_TEXT_MUTED, size = 2.9, fontface = "italic") +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = program, alpha = accent, size = accent)) +
+      ggplot2::aes(tooltip = tooltip,
+                  data_id = dplyr::if_else(.skugg, NA_character_, as.character(program)),
+                  alpha = accent, size = accent)) +
     ggplot2::scale_color_manual(values = DIMENSIONERING_RIKTNING_FARGER, name = NULL, drop = FALSE) +
     ggplot2::scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.45), guide = "none") +
     ggplot2::scale_size_manual(values = c(`TRUE` = 3.6, `FALSE` = 2.4), guide = "none") +
     # byrow = TRUE: håll ordningen i DIMENSIONERING_RIKTNING_FARGER när
     # legenden radbryts, annars blandas kategorierna om kolumnvis (samma
-    # fix som i skapa_diagram_dimensionering_avvikelse()).
-    ggplot2::guides(color = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
+    # fix som i skapa_diagram_dimensionering_avvikelse()). override.aes
+    # säkrar att legendrutorna alltid syns fullt (inte nedtonade av accent).
+    ggplot2::guides(color = ggplot2::guide_legend(nrow = 2, byrow = TRUE,
+                                                  override.aes = list(size = 3.2, alpha = 1))) +
     ggplot2::labs(x = paste0("Förändring i ", tolower(matt_label), " sedan föregående år (procentenheter)"),
                   y = "Avvikelse mot Skolverkets bedömning (procentenheter)",
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top",
                    panel.grid.major.y = ggplot2::element_line(color = "grey92"))
+
+  if (visa_etiketter) {
+    g <- g + ggrepel::geom_text_repel(
+      ggplot2::aes(label = program), data = dplyr::filter(d, !.skugg),
+      size = 3, color = RD_TEXT, max.overlaps = Inf, seed = 1,
+      segment.color = RD_TEXT_MUTED, segment.size = 0.3, show.legend = FALSE)
+  }
 
   .girafe_std(g, width_svg = 10, height_svg = 7.2, selection = TRUE)
 }
