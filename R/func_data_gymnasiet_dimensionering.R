@@ -60,7 +60,10 @@ dimensionering_jamforelse <- function(platser_df) {
     dplyr::summarise(platser = sum(platser, na.rm = TRUE), .groups = "drop")
   tot <- sum(d$platser, na.rm = TRUE)
   d |>
-    dplyr::mutate(andel_platser = dplyr::if_else(tot > 0, 100 * platser / tot, NA_real_)) |>
+    # tot > 0 är ett enda villkor för hela urvalet (inte radvis) - if_else()
+    # storleksätter utfallet efter villkoret, inte efter true/false, och
+    # kraschar därför här; ett vanligt if duger.
+    dplyr::mutate(andel_platser = if (tot > 0) 100 * platser / tot else NA_real_) |>
     dplyr::right_join(bed, by = "program") |>
     dplyr::mutate(platser       = dplyr::coalesce(platser, 0),
                  andel_platser = dplyr::coalesce(andel_platser, 0),
