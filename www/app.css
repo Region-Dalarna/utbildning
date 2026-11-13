@@ -162,6 +162,11 @@ html, body { overflow-x: hidden; }
   width: 100%;
   justify-content: center;
   text-decoration: none;
+  flex-wrap: wrap;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.3;
+  padding: 10px 14px;
 }
 
 /* ---- Hjälptext ovanför stapeln (tydlig tips-ruta, ej rubrik) -------- */
