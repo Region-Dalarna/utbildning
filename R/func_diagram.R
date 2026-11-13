@@ -1452,25 +1452,35 @@ DIMENSIONERING_RIKTNING_FARGER <- c(
 skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel platser",
                                                     rubrik = NULL, underrubrik = NULL, kalla = NULL) {
   d <- df |>
-    dplyr::mutate(program = forcats::fct_reorder(program, avvikelse)) |>
+    dplyr::mutate(program = forcats::fct_reorder(program, avvikelse))
+
+  d_punkter <- d |>
     tidyr::pivot_longer(c(andel_nu, andel_bedomning), names_to = "serie", values_to = "andel") |>
     dplyr::mutate(
       serie   = dplyr::if_else(serie == "andel_nu", matt_label, "Skolverkets bedömning"),
-      serie   = factor(serie, levels = c(matt_label, "Skolverkets bedömning")),
+      serie   = factor(serie, levels = c("Skolverkets bedömning", matt_label)),
       tooltip = paste0("<b>", program, "</b><br/>", serie, ": ",
                        scales::number(andel, accuracy = 0.1), " %"))
 
-  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = program, fill = serie)) +
-    ggiraph::geom_col_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = paste(program, serie)),
-      position = ggplot2::position_dodge2(preserve = "single", padding = 0.12), width = 0.72) +
-    ggplot2::scale_fill_manual(values = stats::setNames(c(RD_PRIMARY, RD_TEXT_MUTED),
-                                                        c(matt_label, "Skolverkets bedömning")), name = NULL) +
-    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.05))) +
+  # Dumbbell i stället för dubbla staplar: en tunn linje mellan Skolverkets
+  # bedömning och faktisk andel gör avståndet (= avvikelsen) direkt synligt,
+  # utan att behöva jämföra två separata stapellängder.
+  g <- ggplot2::ggplot(d, ggplot2::aes(y = program)) +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = andel_bedomning, xend = andel_nu, yend = program),
+      color = RD_TEXT_MUTED, linewidth = 1, alpha = 0.4) +
+    ggiraph::geom_point_interactive(
+      data = d_punkter,
+      ggplot2::aes(x = andel, color = serie, tooltip = tooltip, data_id = paste(program, serie)),
+      size = 3.6) +
+    ggplot2::scale_color_manual(values = stats::setNames(c(RD_TEXT_MUTED, RD_PRIMARY),
+                                                         c("Skolverkets bedömning", matt_label)), name = NULL) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.04, 0.08))) +
     ggplot2::labs(x = "Andel (%)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
-    ggplot2::theme(legend.position = "top")
+    ggplot2::theme(legend.position = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "grey92"))
 
   .girafe_std(g, width_svg = 10, height_svg = max(6, dplyr::n_distinct(d$program) * 0.42 + 1.6),
               selection = TRUE)
@@ -1496,6 +1506,12 @@ skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel plats
     ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL, drop = FALSE) +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.08)) +
+    # byrow = TRUE: annars fyller ggplot legenden kolumnvis och "Stor brist,
+    # Viss brist, Visst överskott, Stort överskott" hamnar på rad 1 medan
+    # "Brist, Balans, Överskott" hamnar på rad 2 - rätt ordning (brist ->
+    # balans -> överskott) sprids då över två rader i stället för att läsas
+    # rad för rad.
+    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
     ggplot2::labs(x = "Avvikelse mot Skolverkets bedömning (procentenheter)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
@@ -1513,9 +1529,14 @@ skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel plats
 # med 18 program annars.
 skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser",
                                                  rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  # "Stabilt"/"Inget jämförelseår" betyder att det inte finns något att agera
+  # på (Skolverket väntar sig ingen förändring, eller så saknas föregående år)
+  # - de tonas ner (mindre, mer genomskinliga) så de fyra handlingsbara
+  # statusarna syns tydligare bland punkterna.
   d <- df |>
     dplyr::mutate(
       riktningsstatus = factor(riktningsstatus, levels = names(DIMENSIONERING_RIKTNING_FARGER)),
+      accent  = !riktningsstatus %in% c("Stabilt", "Inget jämförelseår"),
       tooltip = paste0(
         "<b>", program, "</b><br/>", matt_label, " i år: ",
         scales::number(andel_nu, accuracy = 0.1), " %",
@@ -1530,8 +1551,14 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
     ggplot2::geom_hline(yintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
     ggiraph::geom_point_interactive(
-      ggplot2::aes(tooltip = tooltip, data_id = program), size = 3.2) +
+      ggplot2::aes(tooltip = tooltip, data_id = program, alpha = accent, size = accent)) +
     ggplot2::scale_color_manual(values = DIMENSIONERING_RIKTNING_FARGER, name = NULL, drop = FALSE) +
+    ggplot2::scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.45), guide = "none") +
+    ggplot2::scale_size_manual(values = c(`TRUE` = 3.6, `FALSE` = 2.4), guide = "none") +
+    # byrow = TRUE: håll ordningen i DIMENSIONERING_RIKTNING_FARGER när
+    # legenden radbryts, annars blandas kategorierna om kolumnvis (samma
+    # fix som i skapa_diagram_dimensionering_avvikelse()).
+    ggplot2::guides(color = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
     ggplot2::labs(x = paste0("Förändring i ", tolower(matt_label), " sedan föregående år (procentenheter)"),
                   y = "Avvikelse mot Skolverkets bedömning (procentenheter)",
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
