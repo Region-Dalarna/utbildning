@@ -1612,12 +1612,15 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
     .rd_tema() +
     # .rd_tema() döljer axis.title.y som standard (program-namnen räcker som
     # y-etikett i de andra diagrammen) - här är y en kontinuerlig variabel
-    # som behöver en egen axelrubrik. angle = 90 måste sättas explicit: när
-    # man ersätter ett element_blank() med ett nytt element_text() ärvs inte
-    # theme_minimal()s normala 90-graders vridning, så utan den blir texten
-    # liggande och tar upp onödigt mycket bredd.
+    # som behöver en egen axelrubrik. angle och size måste sättas explicit:
+    # när man ersätter ett element_blank() med ett nytt element_text() ärvs
+    # inte theme_minimal()s normala värden (90 graders vridning, mindre
+    # storlek än brödtexten) - size = 10.4 matchar axis.title.x (rel(0.8) av
+    # .rd_tema()s base_size = 13) så rubrikerna blir lika stora som i de
+    # andra två diagrammen i vyn.
     ggplot2::theme(legend.position = "top",
-                   axis.title.y = ggplot2::element_text(angle = 90, margin = ggplot2::margin(r = 8)),
+                   axis.title.y = ggplot2::element_text(angle = 90, size = 10.4,
+                                                        margin = ggplot2::margin(r = 8)),
                    panel.grid.major.y = ggplot2::element_line(color = "grey92"))
 
   if (visa_etiketter) {
