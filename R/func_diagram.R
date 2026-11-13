@@ -1429,16 +1429,34 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
       labels = REGTOP_BEDOMNINGAR, right = TRUE)
 }
 
-# Grupperad stapel: andel platser vs Skolverkets bedömning, ett par staplar
-# per program. df: program, andel_platser, andel_bedomning, avvikelse (se
-# dimensionering_jamforelse() i func_data_gymnasiet_dimensionering.R).
-skapa_diagram_dimensionering_jamforelse <- function(df, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+# Färger för utvecklingsstatusen (skapa_diagram_dimensionering_scatter()):
+# grönt när man redan är i linje med bedömningen, blått när man rör sig åt
+# rätt håll men inte är i mål än, orange/rött när rörelsen är otillräcklig
+# eller åt fel håll, grått när Skolverket inte bedömer någon förändring
+# eller när föregående år saknas i datan.
+DIMENSIONERING_RIKTNING_FARGER <- c(
+  "I linje med bedömningen"   = rd_farg("rd-kon-man", "#459079"),
+  "Rätt riktning, inte i mål" = RD_PRIMARY,
+  "Står still, fel håll"      = rd_farg("rd-bedomning-3", "#f0a875"),
+  "Fel riktning"              = rd_farg("rd-bedomning-1", "#a6361c"),
+  "Stabilt"                   = RD_TEXT_MUTED,
+  "Inget jämförelseår"        = RD_TEXT_MUTED
+)
+
+# Grupperad stapel: andel (platser eller antagna) vs Skolverkets bedömning,
+# ett par staplar per program. df: program, andel_nu, andel_bedomning,
+# avvikelse (se dimensionering_jamforelse() i
+# func_data_gymnasiet_dimensionering.R). matt_label: "Andel platser" eller
+# "Andel antagna" - styr bara legend/tooltip-text, inte vilken kolumn som
+# används (andel_nu är redan beräknad på rätt mått).
+skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel platser",
+                                                    rubrik = NULL, underrubrik = NULL, kalla = NULL) {
   d <- df |>
     dplyr::mutate(program = forcats::fct_reorder(program, avvikelse)) |>
-    tidyr::pivot_longer(c(andel_platser, andel_bedomning), names_to = "serie", values_to = "andel") |>
+    tidyr::pivot_longer(c(andel_nu, andel_bedomning), names_to = "serie", values_to = "andel") |>
     dplyr::mutate(
-      serie   = dplyr::recode(serie, andel_platser = "Andel platser",
-                              andel_bedomning = "Skolverkets bedömning"),
+      serie   = dplyr::if_else(serie == "andel_nu", matt_label, "Skolverkets bedömning"),
+      serie   = factor(serie, levels = c(matt_label, "Skolverkets bedömning")),
       tooltip = paste0("<b>", program, "</b><br/>", serie, ": ",
                        scales::number(andel, accuracy = 0.1), " %"))
 
@@ -1446,10 +1464,10 @@ skapa_diagram_dimensionering_jamforelse <- function(df, rubrik = NULL, underrubr
     ggiraph::geom_col_interactive(
       ggplot2::aes(tooltip = tooltip, data_id = paste(program, serie)),
       position = ggplot2::position_dodge2(preserve = "single", padding = 0.12), width = 0.72) +
-    ggplot2::scale_fill_manual(values = c("Andel platser" = RD_PRIMARY,
-                                          "Skolverkets bedömning" = RD_TEXT_MUTED), name = NULL) +
+    ggplot2::scale_fill_manual(values = stats::setNames(c(RD_PRIMARY, RD_TEXT_MUTED),
+                                                        c(matt_label, "Skolverkets bedömning")), name = NULL) +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.05))) +
-    ggplot2::labs(x = "Andel av platserna (%)", y = NULL,
+    ggplot2::labs(x = "Andel (%)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
     ggplot2::theme(legend.position = "top")
@@ -1458,15 +1476,16 @@ skapa_diagram_dimensionering_jamforelse <- function(df, rubrik = NULL, underrubr
               selection = TRUE)
 }
 
-# Diverging stapel: avvikelse (andel platser - Skolverkets bedömning) i
+# Diverging stapel: avvikelse (andel_nu - Skolverkets bedömning) i
 # procentenheter, ett program per rad, färgsatt efter brist/överskott.
-skapa_diagram_dimensionering_avvikelse <- function(df, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel platser",
+                                                   rubrik = NULL, underrubrik = NULL, kalla = NULL) {
   d <- df |>
     dplyr::mutate(
       program = forcats::fct_reorder(program, avvikelse),
       bucket  = .dimensionering_bucket(avvikelse),
-      tooltip = paste0("<b>", program, "</b><br/>Platser: ",
-                       scales::number(andel_platser, accuracy = 0.1), " % · Bedömning: ",
+      tooltip = paste0("<b>", program, "</b><br/>", matt_label, ": ",
+                       scales::number(andel_nu, accuracy = 0.1), " % · Bedömning: ",
                        scales::number(andel_bedomning, accuracy = 0.1), " %<br/>Avvikelse: ",
                        dplyr::if_else(avvikelse >= 0, "+", ""),
                        scales::number(avvikelse, accuracy = 0.1), " procentenheter"))
@@ -1484,6 +1503,43 @@ skapa_diagram_dimensionering_avvikelse <- function(df, rubrik = NULL, underrubri
 
   .girafe_std(g, width_svg = 10, height_svg = max(6, dplyr::n_distinct(d$program) * 0.42 + 1.6),
               selection = TRUE)
+}
+
+# Spridningsdiagram: förändring sedan föregående år (x) mot avvikelse från
+# Skolverkets bedömning (y), ett program per punkt, färgsatt efter om
+# utvecklingen går åt det håll Skolverket bedömer och om det räcker (se
+# dimensionering_riktningsstatus() i func_data_gymnasiet_dimensionering.R).
+# Hover-tooltip i stället för permanenta etiketter (ggrepel) - blir rörigt
+# med 18 program annars.
+skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser",
+                                                 rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  d <- df |>
+    dplyr::mutate(
+      riktningsstatus = factor(riktningsstatus, levels = names(DIMENSIONERING_RIKTNING_FARGER)),
+      tooltip = paste0(
+        "<b>", program, "</b><br/>", matt_label, " i år: ",
+        scales::number(andel_nu, accuracy = 0.1), " %",
+        dplyr::if_else(is.na(forandring), "",
+                       paste0(" (", dplyr::if_else(forandring >= 0, "+", ""),
+                             scales::number(forandring, accuracy = 0.1), " pe sedan föregående år)")),
+        "<br/>Bedömning: ", scales::number(andel_bedomning, accuracy = 0.1), " % · Avvikelse: ",
+        dplyr::if_else(avvikelse >= 0, "+", ""), scales::number(avvikelse, accuracy = 0.1), " pe",
+        "<br/>", riktningsstatus))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = forandring, y = avvikelse, color = riktningsstatus)) +
+    ggplot2::geom_hline(yintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggiraph::geom_point_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = program), size = 3.2) +
+    ggplot2::scale_color_manual(values = DIMENSIONERING_RIKTNING_FARGER, name = NULL, drop = FALSE) +
+    ggplot2::labs(x = paste0("Förändring i ", tolower(matt_label), " sedan föregående år (procentenheter)"),
+                  y = "Avvikelse mot Skolverkets bedömning (procentenheter)",
+                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top",
+                   panel.grid.major.y = ggplot2::element_line(color = "grey92"))
+
+  .girafe_std(g, width_svg = 10, height_svg = 7.2, selection = TRUE)
 }
 
 # ============================================================

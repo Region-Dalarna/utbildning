@@ -21,16 +21,21 @@
   "planeringsunderlag för gymnasial utbildning, Dalarnas län")
 
 dimensionering_struktur <- list(
-  jamforelse = list(label = "Platser vs bedömning", klar = TRUE,
+  jamforelse = list(label = "Platser/antagna vs bedömning", klar = TRUE,
                     beskrivning = paste(
-                      "Andelen av platserna per nationellt program i gymnasieskolan,",
-                      "jämfört med Skolverkets bedömning av hur platserna borde",
+                      "Andelen platser eller antagna (välj mått nedan) per nationellt program",
+                      "i gymnasieskolan, jämfört med Skolverkets bedömning av hur de borde",
                       "fördelas läsåret 2026/27.")),
   avvikelse  = list(label = "Avvikelse mot bedömning", klar = TRUE,
                     beskrivning = paste(
-                      "Skillnaden, i procentenheter, mellan andelen platser och Skolverkets",
-                      "bedömda andel per program. Positivt värde: fler platser än",
-                      "bedömningen. Negativt värde: färre."))
+                      "Skillnaden, i procentenheter, mellan andelen (platser eller antagna)",
+                      "och Skolverkets bedömda andel per program. Positivt värde: fler än",
+                      "bedömningen. Negativt värde: färre.")),
+  utveckling = list(label = "Utveckling mot bedömning", klar = TRUE,
+                    beskrivning = paste(
+                      "Förändring sedan föregående år (x-axeln) mot avvikelsen från",
+                      "Skolverkets bedömning (y-axeln), per program. Visar om ett program",
+                      "rör sig åt det håll Skolverket bedömer - och om det räcker."))
 )
 
 # ---- UI --------------------------------------------------------------------
@@ -40,6 +45,11 @@ mod_gymnasiet_dimensionering_ui <- function(id) {
     sidebarPanel(
       width = 3, class = "rd-sidebar",
       uiOutput(ns("indikator_ui")),
+      shinyWidgets::radioGroupButtons(
+        inputId = ns("matt"), label = "Mått",
+        choices = c("Platser" = "platser", "Antagna" = "antagna"),
+        selected = "platser", size = "sm"
+      ),
       tags$hr(),
       shinyWidgets::pickerInput(
         inputId = ns("geo_val"), label = "Område",
@@ -48,7 +58,7 @@ mod_gymnasiet_dimensionering_ui <- function(id) {
           "Gysam"          = c("Hela Gysam" = GYSAM_HELA, geo_val_samverkan),
           "Enskild kommun" = geo_val_kommun
         ),
-        selected = GYSAM_HELA,
+        selected = "_alla_",
         options = shinyWidgets::pickerOptions(liveSearch = TRUE)
       ),
       uiOutput(ns("org_ui")),
@@ -95,10 +105,13 @@ mod_gymnasiet_dimensionering_server <- function(id) {
       dimensionering_struktur[[input$indikator]]
     })
 
+    matt       <- reactive(if (is.null(input$matt)) "platser" else input$matt)
+    matt_label <- reactive(if (identical(matt(), "antagna")) "Andel antagna" else "Andel platser")
+
     # Valt område -> kommunkoder. "_alla_" = hela Dalarna, GYSAM_HELA/ett
     # samverkansområde expanderas via samverkan_i(), annars är valet redan
     # en enskild kommunkod.
-    omr_kod <- reactive(if (is.null(input$geo_val)) GYSAM_HELA else input$geo_val)
+    omr_kod <- reactive(if (is.null(input$geo_val)) "_alla_" else input$geo_val)
     omr_kommkoder <- reactive({
       v <- omr_kod()
       if (identical(v, "_alla_")) return(dalarna_kommuner$kommkod)
@@ -135,14 +148,16 @@ mod_gymnasiet_dimensionering_server <- function(id) {
                   selected = if (!is.null(tidigare) && tidigare %in% ar) tidigare else max(ar))
     })
 
-    platser_ar <- reactive({
-      d <- dplyr::filter(platser_omr(), ar == as.integer(req(input$ar)))
+    # Driftsformsfiltrerat, men INTE årsfiltrerat - dimensionering_jamforelse()
+    # behöver både valt år och föregående år för att räkna ut förändringen.
+    platser_org <- reactive({
+      d <- platser_omr()
       if (org() != "_alla_") d <- dplyr::filter(d, organisationstyp == org())
       d
     })
 
     jamforelse <- reactive({
-      d <- dimensionering_jamforelse(platser_ar())
+      d <- dimensionering_jamforelse(platser_org(), as.integer(req(input$ar)), matt())
       validate(need(nrow(d) > 0, "Inga data för valt urval."))
       d
     })
@@ -154,14 +169,20 @@ mod_gymnasiet_dimensionering_server <- function(id) {
     output$brodsmula <- renderText(paste0("Gymnasiet › Dimensionering › ", valt_indikator()$label))
 
     output$d_bar <- ggiraph::renderGirafe({
-      d <- jamforelse()
+      d  <- jamforelse()
+      ml <- matt_label()
       if (identical(input$indikator, "avvikelse")) {
         skapa_diagram_dimensionering_avvikelse(
-          d, rubrik = "Avvikelse mot Skolverkets bedömning, nationella program",
+          d, matt_label = ml,
+          rubrik = paste0("Avvikelse mot Skolverkets bedömning, nationella program (", tolower(ml), ")"),
+          underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING)
+      } else if (identical(input$indikator, "utveckling")) {
+        skapa_diagram_dimensionering_scatter(
+          d, matt_label = ml, rubrik = "Utveckling mot Skolverkets bedömning",
           underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING)
       } else {
         skapa_diagram_dimensionering_jamforelse(
-          d, rubrik = "Andel platser jämfört med Skolverkets bedömning",
+          d, matt_label = ml, rubrik = paste0(ml, " jämfört med Skolverkets bedömning"),
           underrubrik = underrubrik(), kalla = .KALLA_DIMENSIONERING)
       }
     })
@@ -172,11 +193,15 @@ mod_gymnasiet_dimensionering_server <- function(id) {
               "jämförelsen görs mot den oavsett vilket område som är valt ovan."),
         paste("Bara gymnasieskolans 18 nationella program ingår. Introduktions-",
               "programmet, komvux och inriktningsnivå (som saknar egen bedömning",
-              "i planeringsunderlaget) räknas inte med.")
+              "i planeringsunderlaget) räknas inte med."),
+        paste("Utveckling mot bedömning: grönt = redan i linje med bedömningen, blått = rör",
+              "sig åt rätt håll men inte i mål än, orange/rött = otillräcklig rörelse eller",
+              "åt fel håll, grått = Skolverket bedömer ingen förändring eller föregående år",
+              "saknas i datan.")
       )
       saknas <- dimensionering_okanda_program()
       if (length(saknas) > 0) {
-        n <- c(n, paste0("Hittar inga platser alls för: ", paste(saknas, collapse = ", "),
+        n <- c(n, paste0("Hittar inga platser/antagna alls för: ", paste(saknas, collapse = ", "),
                          " - kontrollera att programnamnen stavas likadant i de två källorna."))
       }
       tags$ul(class = "rd-hint", lapply(n, tags$li))
@@ -184,10 +209,18 @@ mod_gymnasiet_dimensionering_server <- function(id) {
 
     # ---- Nedladdning --------------------------------------------------------
     output$ladda_ner <- downloadHandler(
-      filename = function() paste0("gymnasiet_dimensionering_", input$ar, ".xlsx"),
+      filename = function() paste0("gymnasiet_dimensionering_", matt(), "_", input$ar, ".xlsx"),
       content  = function(file) {
-        d <- dplyr::select(jamforelse(), program, platser, andel_platser,
-                           andel_bedomning, avvikelse, forandringsriktning)
+        ml <- matt_label()
+        d <- jamforelse() |>
+          dplyr::transmute(
+            program, !!ml := andel_nu, `Andel föregående år` = andel_fg,
+            `Förändring (procentenheter)` = forandring,
+            `Skolverkets bedömning (andel)` = andel_bedomning,
+            `Avvikelse mot bedömning (procentenheter)` = avvikelse,
+            `Skolverkets förändringsriktning` = forandringsriktning,
+            bedomningsstatus = riktningsstatus
+          )
         skriv_gymnasie_excel(d, file, blad = "Dimensionering", min_antal = 0)
       }
     )
