@@ -2,6 +2,10 @@ APP_BESKRIVNING <- 'Statistik om förskola, grundskola, gymnasiet, komvux, folkh
 
 APP_TITEL <- 'Utbildning i Dalarna'
 
+# Styr startnotisen "Appen är under utveckling" nere till höger - sätt till
+# TRUE för att visa den igen.
+VISA_UTVECKLINGSNOTIS <- FALSE
+
 shinyUI(
   fluidPage(
     title = APP_TITEL,  # webbläsarflikens rubrik
@@ -37,8 +41,9 @@ shinyUI(
     # ---- Startmeddelande: appen är under utveckling -----------------------
     # Dyker upp som en notis nere till höger vid start, ligger kvar en lång
     # stund så att alla hinner läsa den, och går även att stänga direkt med
-    # krysset.
-    tags$div(
+    # krysset. Avaktiverad via VISA_UTVECKLINGSNOTIS - sätt till TRUE för
+    # att slå på den igen.
+    if (VISA_UTVECKLINGSNOTIS) tags$div(
       id = 'rd-dev-notice', class = 'rd-dev-notice', role = 'status',
       tags$button(
         type = 'button', class = 'rd-dev-notice__stang',
