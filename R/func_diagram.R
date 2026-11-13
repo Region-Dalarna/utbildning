@@ -1636,7 +1636,16 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
       segment.color = RD_TEXT_MUTED, segment.size = 0.3, show.legend = FALSE)
   }
 
-  .girafe_std(g, width_svg = 10, height_svg = 7.2, selection = TRUE)
+  # De tre skuggpunkterna ovan (NA-koordinater med avsikt) ger alltid samma
+  # ofarliga varning när ggplot tar bort dem före ritning - tysta bara den
+  # specifika varningen, låt allt annat gå igenom som vanligt.
+  withCallingHandlers(
+    .girafe_std(g, width_svg = 10, height_svg = 7.2, selection = TRUE),
+    warning = function(w) {
+      if (grepl("missing values or values outside the scale range", conditionMessage(w)))
+        invokeRestart("muffleWarning")
+    }
+  )
 }
 
 # ============================================================
