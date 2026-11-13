@@ -1453,7 +1453,11 @@ skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel plat
                                                     rubrik = NULL, underrubrik = NULL, kalla = NULL) {
   d <- df |>
     dplyr::mutate(
-      program = forcats::fct_reorder(program, avvikelse),
+      # Sorteras efter Skolverkets bedömning (oberoende av om mått = platser
+      # eller antagna) i stället för efter avvikelse - annars byter raderna
+      # plats när man växlar mått, vilket gör det svårt att jämföra samma
+      # program mellan de två måtten.
+      program = forcats::fct_reorder(program, andel_bedomning),
       tooltip_bed = paste0("<b>", program, "</b><br/>Skolverkets bedömning: ",
                           scales::number(andel_bedomning, accuracy = 0.1), " %"),
       tooltip_nu  = paste0("<b>", program, "</b><br/>", matt_label, ": ",
@@ -1496,45 +1500,25 @@ skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel plats
     dplyr::mutate(
       program = forcats::fct_reorder(program, avvikelse),
       bucket  = .dimensionering_bucket(avvikelse),
-      .skugg  = FALSE,
       tooltip = paste0("<b>", program, "</b><br/>", matt_label, ": ",
                        scales::number(andel_nu, accuracy = 0.1), " % · Bedömning: ",
                        scales::number(andel_bedomning, accuracy = 0.1), " %<br/>Avvikelse: ",
                        dplyr::if_else(avvikelse >= 0, "+", ""),
                        scales::number(avvikelse, accuracy = 0.1), " procentenheter"))
 
-  # ggiraph målar inte alltid upp rätt legendfärg för en bucket utan några
-  # rader, trots scale_fill_manual(drop = FALSE) - lägg på en osynlig rad
-  # (bredd 0, ingen tooltip) per saknad bucket på en befintlig programrad, så
-  # att legenden alltid har en riktig rad att hämta färgen från.
-  saknas <- setdiff(REGTOP_BEDOMNINGAR, as.character(d$bucket))
-  if (length(saknas) > 0) {
-    skugg <- d[rep(1, length(saknas)), ]
-    skugg$bucket    <- factor(saknas, levels = REGTOP_BEDOMNINGAR)
-    skugg$avvikelse <- 0
-    skugg$.skugg    <- TRUE
-    skugg$tooltip   <- ""
-    d <- dplyr::bind_rows(d, skugg)
-  }
-
   g <- ggplot2::ggplot(d, ggplot2::aes(x = avvikelse, y = program, fill = bucket)) +
     ggiraph::geom_col_interactive(
-      ggplot2::aes(tooltip = tooltip,
-                  data_id = dplyr::if_else(.skugg, NA_character_, as.character(program))),
-      width = 0.74) +
+      ggplot2::aes(tooltip = tooltip, data_id = as.character(program)), width = 0.74) +
     ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
-    ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL, drop = FALSE) +
+    # REGTOP-skalans egna kategorinamn (Stor brist/Viss brist/...) beskriver
+    # inte riktigt DETTA diagram - avvikelsen i procentenheter står redan på
+    # x-axeln - så ingen legend ritas ut, men färgerna (samma språk som
+    # Prognos 2040) behålls som en visuell gradient.
+    ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL, drop = FALSE, guide = "none") +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.08)) +
-    # byrow = TRUE: annars fyller ggplot legenden kolumnvis och "Stor brist,
-    # Viss brist, Visst överskott, Stort överskott" hamnar på rad 1 medan
-    # "Brist, Balans, Överskott" hamnar på rad 2 - rätt ordning (brist ->
-    # balans -> överskott) sprids då över två rader i stället för att läsas
-    # rad för rad.
-    ggplot2::guides(fill = ggplot2::guide_legend(nrow = 2, byrow = TRUE)) +
     ggplot2::labs(x = "Avvikelse mot Skolverkets bedömning (procentenheter)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
-    .rd_tema() +
-    ggplot2::theme(legend.position = "top")
+    .rd_tema()
 
   .girafe_std(g, width_svg = 10, height_svg = max(6, dplyr::n_distinct(d$program) * 0.42 + 1.6),
               selection = TRUE)
@@ -1626,7 +1610,11 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
                   y = "Avvikelse mot Skolverkets bedömning (procentenheter)",
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
     .rd_tema() +
+    # .rd_tema() döljer axis.title.y som standard (program-namnen räcker som
+    # y-etikett i de andra diagrammen) - här är y en kontinuerlig variabel
+    # som behöver en egen axelrubrik, så den sätts tillbaka.
     ggplot2::theme(legend.position = "top",
+                   axis.title.y = ggplot2::element_text(margin = ggplot2::margin(r = 8)),
                    panel.grid.major.y = ggplot2::element_line(color = "grey92"))
 
   if (visa_etiketter) {
