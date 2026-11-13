@@ -1472,7 +1472,7 @@ skapa_diagram_dimensionering_jamforelse <- function(df, matt_label = "Andel plat
     ggiraph::geom_col_interactive(
       ggplot2::aes(x = andel_bedomning, fill = "Skolverkets bedömning",
                   tooltip = tooltip_bed, data_id = paste(program, "bed")),
-      width = 0.42, alpha = 0.3, color = RD_TEXT_MUTED, linewidth = 0.25) +
+      width = 0.55, alpha = 0.3, color = RD_TEXT_MUTED, linewidth = 0.25) +
     ggiraph::geom_col_interactive(
       ggplot2::aes(x = andel_nu, fill = matt_label,
                   tooltip = tooltip_nu, data_id = paste(program, "nu")),
@@ -1632,7 +1632,7 @@ skapa_diagram_dimensionering_scatter <- function(df, matt_label = "Andel platser
   if (visa_etiketter) {
     g <- g + ggrepel::geom_text_repel(
       ggplot2::aes(label = program), data = dplyr::filter(d, !.skugg),
-      size = 3, color = RD_TEXT, max.overlaps = Inf, seed = 1,
+      size = 3, color = RD_TEXT_MUTED, max.overlaps = Inf, seed = 1,
       segment.color = RD_TEXT_MUTED, segment.size = 0.3, show.legend = FALSE)
   }
 

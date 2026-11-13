@@ -204,15 +204,6 @@ mod_gymnasiet_dimensionering_server <- function(id) {
               "programmet, komvux och inriktningsnivå (som saknar egen bedömning",
               "i planeringsunderlaget) räknas inte med.")
       )
-      # Färgförklaringen hör bara hemma vid spridningsdiagrammet - diagrammet
-      # har dessutom en egen legend, så notisen fyller bara i det som inte
-      # syns direkt i den (grått/orange-rött-nyanserna).
-      if (identical(input$indikator, "utveckling")) {
-        n <- c(n, paste("Utveckling mot bedömning: grönt = redan i linje med bedömningen, blått = rör",
-                        "sig åt rätt håll men inte i mål än, orange/rött = otillräcklig rörelse eller",
-                        "åt fel håll, grått = Skolverket bedömer ingen förändring eller föregående år",
-                        "saknas i datan."))
-      }
       saknas <- dimensionering_okanda_program()
       if (length(saknas) > 0) {
         n <- c(n, paste0("Hittar inga platser/antagna alls för: ", paste(saknas, collapse = ", "),
