@@ -170,10 +170,15 @@ mod_gymnasiet_ui <- function(id) {
       class = "rd-segmented",
       shinyWidgets::radioGroupButtons(
         inputId  = ns("omrade"), label = NULL,
-        # Avgångna (egen modul, mod_gymnasiet_avgangna.R) före Etablering.
-        choices  = append(.choices_fran_lista(gymnasiet_struktur),
-                          c("Avgångna" = "avgangna"),
-                          after = which(names(gymnasiet_struktur) == "resultat")),
+        # Dimensionering (egen modul, mod_gymnasiet_dimensionering.R) direkt
+        # efter Antagning; Avgångna (mod_gymnasiet_avgangna.R) före Etablering.
+        choices  = {
+          bas <- append(.choices_fran_lista(gymnasiet_struktur),
+                        c("Dimensionering" = "dimensionering"),
+                        after = which(names(gymnasiet_struktur) == "antagning"))
+          append(bas, c("Avgångna" = "avgangna"),
+                after = which(names(gymnasiet_struktur) == "resultat") + 1)
+        },
         selected = names(gymnasiet_struktur)[1]
       )
     ),
@@ -184,7 +189,12 @@ mod_gymnasiet_ui <- function(id) {
     ),
 
     conditionalPanel(
-      condition = "input.omrade != 'avgangna'", ns = ns,
+      condition = "input.omrade == 'dimensionering'", ns = ns,
+      mod_gymnasiet_dimensionering_ui(ns("dim"))
+    ),
+
+    conditionalPanel(
+      condition = "input.omrade != 'avgangna' && input.omrade != 'dimensionering'", ns = ns,
     sidebarLayout(
       sidebarPanel(
         width = 3, class = "rd-sidebar",
@@ -258,17 +268,19 @@ mod_gymnasiet_ui <- function(id) {
 # ---- Server ----------------------------------------------------------------
 mod_gymnasiet_server <- function(id, lank = list()) {
   moduleServer(id, function(input, output, session) {
-    # Statistikområdet Avgångna har en egen modul (mod_gymnasiet_avgangna.R).
+    # Avgångna och Dimensionering har egna moduler (mod_gymnasiet_avgangna.R,
+    # mod_gymnasiet_dimensionering.R).
     mod_gymnasiet_avgangna_server("avg")
+    mod_gymnasiet_dimensionering_server("dim")
 
     ns <- session$ns
 
-    # ---- Djuplänkning: omrade (statiskt val i UI:n, 5 lägen inkl.
-    # "avgangna" som inte finns i gymnasiet_struktur) + indikator. Se
-    # mod_folkhogskola.R för omrade_malvarde-mönstret.
+    # ---- Djuplänkning: omrade (statiskt val i UI:n, 6 lägen inkl.
+    # "avgangna"/"dimensionering" som inte finns i gymnasiet_struktur) +
+    # indikator. Se mod_folkhogskola.R för omrade_malvarde-mönstret.
     omrade_default  <- names(gymnasiet_struktur)[1]
     omrade_malvarde <- if (!is.null(lank$omrade) &&
-                           lank$omrade %in% c(names(gymnasiet_struktur), "avgangna"))
+                           lank$omrade %in% c(names(gymnasiet_struktur), "avgangna", "dimensionering"))
       lank$omrade else omrade_default
     lank_indikator_forst <- shiny::reactiveVal(TRUE)
     lank_omrade_forst <- shiny::reactiveVal(!identical(omrade_malvarde, omrade_default))

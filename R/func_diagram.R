@@ -1417,6 +1417,76 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
 }
 
 # ============================================================
+#  Dimensionering: platsandel vs Skolverkets bedömning (gymnasieskolans
+#  nationella program). REGTOP:s 7-stegsskala (brist -> balans -> överskott,
+#  se def_farger.R) återanvänds för att färgsätta avvikelsen - samma
+#  färgspråk som Prognos 2040: platsandel UNDER bedömningen är "brist"
+#  (varma färger, för få platser), ÖVER bedömningen är "överskott" (blått,
+#  för många platser).
+# ============================================================
+.dimensionering_bucket <- function(avvikelse) {
+  cut(avvikelse, breaks = c(-Inf, -4, -2, -0.5, 0.5, 2, 4, Inf),
+      labels = REGTOP_BEDOMNINGAR, right = TRUE)
+}
+
+# Grupperad stapel: andel platser vs Skolverkets bedömning, ett par staplar
+# per program. df: program, andel_platser, andel_bedomning, avvikelse (se
+# dimensionering_jamforelse() i func_data_gymnasiet_dimensionering.R).
+skapa_diagram_dimensionering_jamforelse <- function(df, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  d <- df |>
+    dplyr::mutate(program = forcats::fct_reorder(program, avvikelse)) |>
+    tidyr::pivot_longer(c(andel_platser, andel_bedomning), names_to = "serie", values_to = "andel") |>
+    dplyr::mutate(
+      serie   = dplyr::recode(serie, andel_platser = "Andel platser",
+                              andel_bedomning = "Skolverkets bedömning"),
+      tooltip = paste0("<b>", program, "</b><br/>", serie, ": ",
+                       scales::number(andel, accuracy = 0.1), " %"))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = andel, y = program, fill = serie)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = paste(program, serie)),
+      position = ggplot2::position_dodge2(preserve = "single", padding = 0.12), width = 0.72) +
+    ggplot2::scale_fill_manual(values = c("Andel platser" = RD_PRIMARY,
+                                          "Skolverkets bedömning" = RD_TEXT_MUTED), name = NULL) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0, 0.05))) +
+    ggplot2::labs(x = "Andel av platserna (%)", y = NULL,
+                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top")
+
+  .girafe_std(g, width_svg = 10, height_svg = max(6, dplyr::n_distinct(d$program) * 0.42 + 1.6),
+              selection = TRUE)
+}
+
+# Diverging stapel: avvikelse (andel platser - Skolverkets bedömning) i
+# procentenheter, ett program per rad, färgsatt efter brist/överskott.
+skapa_diagram_dimensionering_avvikelse <- function(df, rubrik = NULL, underrubrik = NULL, kalla = NULL) {
+  d <- df |>
+    dplyr::mutate(
+      program = forcats::fct_reorder(program, avvikelse),
+      bucket  = .dimensionering_bucket(avvikelse),
+      tooltip = paste0("<b>", program, "</b><br/>Platser: ",
+                       scales::number(andel_platser, accuracy = 0.1), " % · Bedömning: ",
+                       scales::number(andel_bedomning, accuracy = 0.1), " %<br/>Avvikelse: ",
+                       dplyr::if_else(avvikelse >= 0, "+", ""),
+                       scales::number(avvikelse, accuracy = 0.1), " procentenheter"))
+
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = avvikelse, y = program, fill = bucket)) +
+    ggiraph::geom_col_interactive(
+      ggplot2::aes(tooltip = tooltip, data_id = as.character(program)), width = 0.74) +
+    ggplot2::geom_vline(xintercept = 0, color = RD_TEXT_MUTED, linewidth = 0.4) +
+    ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL, drop = FALSE) +
+    ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.08)) +
+    ggplot2::labs(x = "Avvikelse mot Skolverkets bedömning (procentenheter)", y = NULL,
+                  title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
+    .rd_tema() +
+    ggplot2::theme(legend.position = "top")
+
+  .girafe_std(g, width_svg = 10, height_svg = max(6, dplyr::n_distinct(d$program) * 0.42 + 1.6),
+              selection = TRUE)
+}
+
+# ============================================================
 #  UI-hjälpare: gråa ut + inaktivera specifika knappar i en
 #  shinyWidgets radioGroupButtons. Manuell rekursion (ingen
 #  tagQuery) för full förutsägbarhet oavsett htmltools-version.
