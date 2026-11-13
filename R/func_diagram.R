@@ -1418,15 +1418,22 @@ skapa_diagram_etablering_trend <- function(df_dalarna, df_riket,
 
 # ============================================================
 #  Dimensionering: platsandel vs Skolverkets bedömning (gymnasieskolans
-#  nationella program). REGTOP:s 7-stegsskala (brist -> balans -> överskott,
-#  se def_farger.R) återanvänds för att färgsätta avvikelsen - samma
-#  färgspråk som Prognos 2040: platsandel UNDER bedömningen är "brist"
-#  (varma färger, för få platser), ÖVER bedömningen är "överskott" (blått,
-#  för många platser).
+#  nationella program). Till skillnad från Prognos 2040 (där överskott är
+#  "bra") är en avvikelse här lika problematisk åt båda hållen - för få
+#  platser är inte bättre eller sämre än för många - så bucketen byggs på
+#  |avvikelse| och återanvänder bara REGTOP:s varma brist-färger (för få/för
+#  många ger samma färg vid samma avstånd från bedömningen), i stället för
+#  hela den 7-stegiga brist->balans->överskott-skalan.
 # ============================================================
+.DIMENSIONERING_AVVIKELSE_NIVAER <- c("Balans", "Viss avvikelse", "Avvikelse", "Stor avvikelse")
+DIMENSIONERING_AVVIKELSE_FARGER <- stats::setNames(
+  c(BEDOMNING_FARGER[["Balans"]], BEDOMNING_FARGER[["Viss brist"]],
+    BEDOMNING_FARGER[["Brist"]], BEDOMNING_FARGER[["Stor brist"]]),
+  .DIMENSIONERING_AVVIKELSE_NIVAER)
+
 .dimensionering_bucket <- function(avvikelse) {
-  cut(avvikelse, breaks = c(-Inf, -4, -2, -0.5, 0.5, 2, 4, Inf),
-      labels = REGTOP_BEDOMNINGAR, right = TRUE)
+  cut(abs(avvikelse), breaks = c(-Inf, 0.5, 2, 4, Inf),
+      labels = .DIMENSIONERING_AVVIKELSE_NIVAER, right = TRUE)
 }
 
 # Färger för utvecklingsstatusen (skapa_diagram_dimensionering_scatter()):
@@ -1522,7 +1529,7 @@ skapa_diagram_dimensionering_avvikelse <- function(df, matt_label = "Andel plats
     # inte riktigt DETTA diagram - avvikelsen i procentenheter står redan på
     # x-axeln - så ingen legend ritas ut, men färgerna (samma språk som
     # Prognos 2040) behålls som en visuell gradient.
-    ggplot2::scale_fill_manual(values = BEDOMNING_FARGER, name = NULL, drop = FALSE, guide = "none") +
+    ggplot2::scale_fill_manual(values = DIMENSIONERING_AVVIKELSE_FARGER, name = NULL, drop = FALSE, guide = "none") +
     ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = 0.08)) +
     ggplot2::labs(x = "Avvikelse mot Skolverkets bedömning (procentenheter)", y = NULL,
                   title = rubrik, subtitle = underrubrik, caption = .kalltext(kalla)) +
