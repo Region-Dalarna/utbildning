@@ -77,6 +77,7 @@ mod_gymnasiet_dimensionering_ui <- function(id) {
         class = "rd-card",
         div(class = "rd-brodsmula", textOutput(ns("brodsmula"))),
         ggiraph::girafeOutput(ns("d_bar"), height = "620px"),
+        uiOutput(ns("omrvarning")),
         uiOutput(ns("notiser"))
       )
     )
@@ -209,10 +210,29 @@ mod_gymnasiet_dimensionering_server <- function(id) {
       }
     })
 
+    # Skolverkets bedömning gäller hela Dalarna oavsett valt område - det är
+    # lätt att missa när man zoomat in på en kommun/Gysam-område, så det får
+    # ett eget avstängningsbart varningskort i stället för att drunkna bland
+    # de övriga notiserna. Visas bara när man avviker från "Hela Dalarna".
+    output$omrvarning <- renderUI({
+      if (identical(omr_kod(), "_alla_")) return(NULL)
+      id <- ns("omrvarning_card")
+      tags$div(
+        id = id, class = "rd-varning", role = "alert",
+        tags$button(
+          type = "button", class = "rd-varning__stang",
+          onclick = sprintf(
+            "document.getElementById('%s').classList.add('rd-varning--dold')", id),
+          `aria-label` = "Stäng varningen", HTML("&times;")
+        ),
+        tags$strong("Observera: "),
+        "Skolverkets bedömning avser läsåret 2026/27 och gäller hela Dalarna - ",
+        "jämförelsen görs mot den oavsett vilket område som är valt ovan."
+      )
+    })
+
     output$notiser <- renderUI({
       n <- c(
-        paste("Skolverkets bedömning avser läsåret 2026/27 och gäller hela Dalarna -",
-              "jämförelsen görs mot den oavsett vilket område som är valt ovan."),
         paste("Bara gymnasieskolans 18 nationella program ingår. Introduktions-",
               "programmet, komvux och inriktningsnivå (som saknar egen bedömning",
               "i planeringsunderlaget) räknas inte med.")
