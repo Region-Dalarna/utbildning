@@ -17,6 +17,10 @@ library(ggiraph)
 library(ggrepel)
 library(rdshinyappar)
 
+# Felmeddelanden: på servern visas inga R-fel för användaren (sanitize = TRUE); felet skrivs ändå till appens logg
+# (se Adminportalen, Driftstatus - Loggar). Lokalt i RStudio visas felen i klartext för att underlätta felsökning.
+options(shiny.sanitize.errors = !interactive())
+
 telemetry <- skapa_telemetry("utbildning")
 
 # ---- Delade hjälpfunktioner för Samhällsanalys Shiny-appar -----------------
