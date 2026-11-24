@@ -31,38 +31,6 @@ jobs:
           fi
           echo "Bekräftelse OK. Tar bort ${{ github.event.repository.name }} från ${{ inputs.target }} server."
 
+      # shiny_avpublicera.sh (serverdrift) tar bort appen och uppdaterar landningssida och app-lista
       - name: Ta bort app från Shiny-server
-        run: |
-          APP_DIR="/srv/shiny-server/${{ github.event.repository.name }}"
-
-          # säkerhetsräcke: pathen MÅSTE ligga under /srv/shiny-server/
-          # och får inte vara just själva foldern
-          if [[ "$APP_DIR" != /srv/shiny-server/* ]] || [ "$APP_DIR" = "/srv/shiny-server/" ]; then
-            echo "FEL: Otillåten sökväg: $APP_DIR"
-            exit 1
-          fi
-
-          if [ -d "$APP_DIR" ]; then
-            echo "Tar bort $APP_DIR"
-            sudo rm -rf "$APP_DIR"
-            echo "App borttagen."
-          else
-            echo "Ingen app hittades i $APP_DIR — inget att ta bort."
-          fi
-
-      - name: Restart Shiny Server if available
-        run: |
-          if systemctl status shiny-server >/dev/null 2>&1; then
-            sudo systemctl restart shiny-server && echo "Shiny Server omstartad."
-          fi
-
-      - name: Regenerera landningssida
-        run: |
-          sudo -u shiny /usr/local/bin/generera_landningssida.sh || echo "Varning: kunde inte regenerera landningssidan (ej kritiskt fel)"
-
-      - name: Synka app-lista mot databasen
-        run: |
-          sudo -u shiny /usr/local/bin/synka_app_lista.sh || echo "Varning: kunde inte synka app-listan (ej kritiskt fel)"
-
-
-# (touch för workflow-registrering)
+        run: /usr/local/bin/shiny_avpublicera.sh "${{ github.event.repository.name }}"
